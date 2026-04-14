@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>英文單字練習 v8 — 國中生專屬</title>
+<link rel="preload" href="vocabulary.css" as="style">
+<link rel="preload" href="vocabulary.js" as="script">
+<link rel="stylesheet" href="vocabulary.css">
+<!-- Supabase JS Client (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+<div class="app">
+<div id="loginScreen" class="screen active">
+  <div class="page-bg">
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-icon">📚</div>
+        <div class="login-title">英文單字練習 v8</div>
+        <div class="login-sub">國中生專屬，1857個單字 · 含CEFR分級</div>
+
+        <!-- Tab 切換 -->
+        <div style="display:flex;gap:0;border:1.5px solid #AFA9EC;border-radius:10px;overflow:hidden;margin-bottom:18px">
+          <button id="ltab-login" onclick="switchLoginTab('login')"
+            style="flex:1;padding:9px 0;font-size:14px;font-weight:600;border:none;cursor:pointer;background:#3C3489;color:#fff;transition:background .2s">
+            登入
+          </button>
+          <button id="ltab-reg" onclick="switchLoginTab('register')"
+            style="flex:1;padding:9px 0;font-size:14px;font-weight:600;border:none;cursor:pointer;background:#f5f4ff;color:#3C3489;transition:background .2s">
+            申請帳號
+          </button>
+        </div>
+
+        <!-- ── 登入表單 ── -->
+        <div id="loginForm">
+          <div class="form-row"><label>帳號</label><input type="text" id="lu" placeholder="輸入帳號" autocomplete="username"></div>
+          <div class="form-row"><label>密碼</label><input type="password" id="lp" placeholder="輸入密碼" autocomplete="current-password"></div>
+          <p id="lerr" class="err-msg" style="display:none">帳號或密碼錯誤，請再試一次</p>
+          <button id="btnLogin" class="btn-login" onclick="doLogin()">登入</button>
+        </div>
+
+        <!-- ── 註冊表單 ── -->
+        <div id="registerForm" style="display:none">
+          <div class="form-row"><label>帳號</label><input type="text" id="ru" placeholder="英文/數字，3-20字元" autocomplete="username"></div>
+          <div class="form-row"><label>姓名</label><input type="text" id="rname" placeholder="顯示名稱（中文OK）"></div>
+          <div class="form-row">
+            <label>年級</label>
+            <select id="rgrade" style="width:100%;padding:9px 12px;border:1.5px solid #D3D1C7;border-radius:8px;font-size:14px;background:#faf9f7;color:#2C2C2A">
+              <option value="國一">國一</option>
+              <option value="國二">國二</option>
+              <option value="國三">國三</option>
+            </select>
+          </div>
+          <div class="form-row"><label>密碼</label><input type="password" id="rp" placeholder="至少 6 個字元" autocomplete="new-password"></div>
+          <div class="form-row"><label>確認密碼</label><input type="password" id="rp2" placeholder="再輸入一次密碼" autocomplete="new-password"></div>
+          <p id="rerr" class="err-msg" style="display:none"></p>
+          <p id="rsuc" style="display:none;color:#1D9E75;font-size:13px;text-align:center;margin:8px 0;font-weight:600">
+            ✅ 申請已送出！請等待管理員審核後即可登入。
+          </p>
+          <button id="btnRegister" class="btn-login" onclick="doRegister()">送出申請</button>
+          <p style="text-align:center;font-size:12px;color:#888;margin-top:10px">申請後需等管理員批准才能登入</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="mainScreen" class="screen">
+  <div class="main-wrap">
+    <div class="header">
+      <div class="header-left">
+        <span class="header-title">英文單字 v8</span>
+        <span class="badge bp" id="levelBadge">國一</span>
+      </div>
+      <div class="header-right">
+        <span class="streak-pill" id="streakLabel">🔥 1天</span>
+        <span class="user-name" id="userLabel"></span>
+        <button class="btn-sm" onclick="openLevelModal()" style="background:#EEEDFE;border-color:#AFA9EC;color:#3C3489">⚙️ 程度</button>
+        <button class="btn-sm" onclick="doLogout()">登出</button>
+      </div>
+    </div>
+
+        <div class="tab-bar">
+      <button class="tab active" onclick="switchTab('stats',this)">紀錄</button>
+      <button class="tab" onclick="switchTab('practice',this)">練習</button>
+      <button class="tab" onclick="switchTab('game',this)">🎮 遊戲</button>
+      <button class="tab" onclick="switchTab('manage',this)">單字庫</button>
+    </div>
+
+        <!-- PRACTICE TAB -->
+    <div id="tab-practice" class="tab-content" style="display:none">
+      <div style="display:flex;gap:3px;background:#D3D1C7;padding:3px;border-radius:10px;margin-bottom:1rem">
+        <button class="ptab active" id="ptab-btn-vocab"   onclick="switchPTab('vocab',this)"   style="flex:1;padding:7px 2px;text-align:center;font-size:12px;border:1px solid #B4B2A9;background:#fff;color:#2C2C2A;border-radius:7px;cursor:pointer;font-weight:600">📖 單字</button>
+        <button class="ptab"        id="ptab-btn-spell"   onclick="switchPTab('spell',this)"   style="flex:1;padding:7px 2px;text-align:center;font-size:12px;border:none;background:none;color:#5F5E5A;border-radius:7px;cursor:pointer;font-weight:500">✏️ 拼字</button>
+        <button class="ptab"        id="ptab-btn-grammar" onclick="switchPTab('grammar',this)" style="flex:1;padding:7px 2px;text-align:center;font-size:12px;border:none;background:none;color:#5F5E5A;border-radius:7px;cursor:pointer;font-weight:500">📝 文法</button>
+        <button class="ptab"        id="ptab-btn-reading" onclick="switchPTab('reading',this)" style="flex:1;padding:7px 2px;text-align:center;font-size:12px;border:none;background:none;color:#5F5E5A;border-radius:7px;cursor:pointer;font-weight:500">📚 閱讀</button>
+      </div>
+      <div id="ptab-content-vocab"   class="ptab-content">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;color:#5F5E5A" id="vProgressText">第 1 / 10 個單字</span>
+          <span class="vocab-count" id="vPoolCount"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button id="autoNextBtn" onclick="toggleAutoNext()" style="padding:4px 10px;font-size:12px;border:1.5px solid #1D9E75;border-radius:99px;background:#E1F5EE;color:#085041;cursor:pointer;font-weight:600">⚡ 自動切換：開</button>
+          <div class="level-row">
+            <button class="lbtn active" onclick="setLevel(0,this)">國一</button>
+            <button class="lbtn" onclick="setLevel(1,this)">國二</button>
+            <button class="lbtn" onclick="setLevel(2,this)">國三</button>
+          </div>
+        </div>
+      </div>
+      <div class="prog-wrap"><div class="prog-fill" id="vProgress" style="width:10%"></div></div>
+      <div class="card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+          <div>
+            <div class="word-big" id="vWord"></div>
+            <div class="phonetic" id="vPhonetic"></div>
+            <span class="badge bb" style="margin-top:8px;display:inline-block" id="vPos"></span> <span class="badge" style="margin-top:8px;display:inline-block;font-size:11px;padding:3px 9px;border-radius:99px;font-weight:600" id="vCEFR"></span>
+          </div>
+          <button class="speak-btn" onclick="speak('v')">🔊 發音</button>
+        </div>
+        <div class="example-box" id="vExample"></div>
+      </div>
+      <div id="quizBlock">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;color:#5F5E5A">這個單字的意思是？</span>
+          <span class="mode-pill mode-quiz">測驗模式</span>
+        </div>
+        <div id="quizOpts"></div>
+        <p class="feedback" id="vFeedback"></p>
+        <button class="reveal-btn" onclick="revealMeaning()">不確定？點我直接看答案</button>
+      </div>
+      <div id="revealBlock" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;color:#5F5E5A">中文意思</span>
+          <span class="mode-pill mode-reveal">已看答案</span>
+        </div>
+        <div class="meaning-box" id="vMeaning"></div>
+      </div>
+      <div class="nav-row">
+        <button class="btn-nav" id="vPrev" onclick="vGo(-1)">← 上一個</button>
+        <button class="btn-nav btn-next" id="vNext" onclick="vGoNext()">下一個 →</button>
+      </div>
+      </div>
+      <div id="ptab-content-spell"   class="ptab-content" style="display:none">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;color:#5F5E5A" id="sProgressText">第 1 / 10 題</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button id="sAutoNextBtn" onclick="toggleSpellAutoNext()" style="padding:4px 10px;font-size:12px;border:1.5px solid #1D9E75;border-radius:99px;background:#E1F5EE;color:#085041;cursor:pointer;font-weight:600">⚡ 自動切換：開</button>
+          <div class="level-row">
+            <button class="lbtn active" onclick="setSLevel(0,this)">國一</button>
+            <button class="lbtn" onclick="setSLevel(1,this)">國二</button>
+            <button class="lbtn" onclick="setSLevel(2,this)">國三</button>
+          </div>
+        </div>
+      </div>
+      <div class="prog-wrap"><div class="prog-fill" id="sProgress" style="width:10%"></div></div>
+      <div class="card" id="spellCard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span class="mode-pill mode-spell">拼字練習</span>
+          <span style="font-size:13px;color:#888780" id="sScoreLabel">已答對 0 題</span>
+        </div>
+        <div id="sZhArea"></div>
+        <div style="margin-bottom:8px">
+          <div class="letter-box" id="letterBoxes"></div>
+          <input class="spell-input" type="text" id="spellInput" placeholder="輸入拼字..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <button id="confirmSpellBtn" onclick="checkSpell()" style="width:100%;padding:11px;background:#534AB7;color:#EEEDFE;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:10px">確認答案</button>
+        <div class="hint-row">
+          <span class="hint-pill" onclick="giveHint()">💡 提示（顯示首字母）</span>
+          <span class="hint-pill" onclick="showSpellAnswer()">放棄，看答案</span>
+        </div>
+        <div id="spellAnswerReveal" style="display:none"></div>
+        <p class="feedback" id="sFeedback"></p>
+      </div>
+      <div class="nav-row">
+        <button class="btn-nav" id="sPrev" onclick="sGo(-1)">← 上一題</button>
+        <button class="btn-nav btn-next" id="sNext" onclick="sGoNext()">下一題 →</button>
+      </div>
+      </div>
+      <div id="ptab-content-grammar" class="ptab-content" style="display:none">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+        <span style="font-size:13px;color:#5F5E5A" id="gProgressText">第 1 / 10 題</span>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button id="gAutoNextBtn" onclick="toggleGrammarAutoNext()" style="padding:4px 10px;font-size:12px;border:1.5px solid #1D9E75;border-radius:99px;background:#E1F5EE;color:#085041;cursor:pointer;font-weight:600">⚡ 自動切換：開</button>
+          <div class="level-row">
+            <button class="lbtn active" onclick="setGLevel(0,this)">國一</button>
+            <button class="lbtn" onclick="setGLevel(1,this)">國二</button>
+            <button class="lbtn" onclick="setGLevel(2,this)">國三</button>
+          </div>
+        </div>
+      </div>
+      <div class="prog-wrap"><div class="prog-fill" id="gProgress" style="width:12%"></div></div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <span class="badge ba" id="gTopic"></span>
+          <span style="font-size:13px;color:#888780" id="gIdx"></span>
+        </div>
+        <div class="grammar-stem" id="gStem"></div>
+        <div id="gOpts"></div>
+        <p class="feedback" id="gFeedback"></p>
+        <div class="explain-box" id="gExplain"></div>
+      </div>
+      <div class="nav-row">
+        <button class="btn-nav" id="gPrev" onclick="gGo(-1)">← 上一題</button>
+        <button class="btn-nav btn-next" id="gNext" onclick="gGoNext()">下一題 →</button>
+      </div>
+      </div>
+      <div id="ptab-content-reading" class="ptab-content" style="display:none">
+
+
+      <div id="reading-selector">
+        <p style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:14px">選擇練習類型</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1rem">
+          <div onclick="openReading('read')" style="background:#fff;border:1.5px solid #D3D1C7;border-radius:14px;padding:20px 14px;cursor:pointer;text-align:center">
+            <div style="font-size:36px;margin-bottom:8px">📖</div>
+            <div style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:4px">閱讀測驗</div>
+            <div style="font-size:12px;color:#888780;line-height:1.5">閱讀英文文章，回答理解問題</div>
+          </div>
+          <div onclick="openReading('listen')" style="background:#fff;border:1.5px solid #D3D1C7;border-radius:14px;padding:20px 14px;cursor:pointer;text-align:center">
+            <div style="font-size:36px;margin-bottom:8px">🎧</div>
+            <div style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:4px">聽力測驗</div>
+            <div style="font-size:12px;color:#888780;line-height:1.5">聆聽英文朗讀，回答理解問題</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-bottom:1rem">
+          <button class="lbtn active" id="rlv0" onclick="setReadLevel(0,this)">國一</button>
+          <button class="lbtn" id="rlv1" onclick="setReadLevel(1,this)">國二</button>
+          <button class="lbtn" id="rlv2" onclick="setReadLevel(2,this)">國三</button>
+        </div>
+      </div>
+
+      <div id="reading-play" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <button onclick="backToReadingSelector()" style="padding:5px 12px;font-size:13px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#5F5E5A;cursor:pointer">← 返回</button>
+          <span style="font-size:15px;font-weight:600;color:#2C2C2A" id="readingModeLabel">📖 閱讀測驗</span>
+          <span style="font-size:12px;color:#888780;margin-left:auto" id="readingLevelBadge"></span>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <p style="font-size:14px;font-weight:600;color:#2C2C2A" id="readingTitle">文章標題</p>
+            <button id="readListenBtn" onclick="readAloud()" style="display:none;padding:5px 12px;font-size:13px;border:1.5px solid #EF9F27;border-radius:99px;background:#FAEEDA;color:#633806;cursor:pointer">🔊 朗讀</button>
+          </div>
+          <div style="font-size:14px;color:#2C2C2A;line-height:2;background:#F1EFE8;border-radius:10px;padding:14px" id="readingPassage"></div>
+          <div id="listeningArea" style="display:none;text-align:center;padding:1.5rem">
+            <button onclick="readAloud()" style="padding:14px 28px;background:#534AB7;color:#EEEDFE;border:none;border-radius:12px;font-size:16px;cursor:pointer;font-weight:600">🔊 播放朗讀</button>
+            <p style="font-size:12px;color:#888780;margin-top:10px">聆聽完畢後回答下方問題</p>
+          </div>
+          <div id="vocabHighlights" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
+        </div>
+        <div id="readingQuestions"></div>
+        <button id="readingSubmitBtn" onclick="submitReading()" style="width:100%;padding:12px;background:#534AB7;color:#EEEDFE;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;display:none">送出答案</button>
+        <div id="readingResult" style="display:none"></div>
+        <button id="readingNextBtn" onclick="nextReadingPassage()" style="display:none;width:100%;padding:12px;background:#1D9E75;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px">下一篇 →</button>
+      </div>
+      </div>
+    </div><!-- end tab-practice -->
+
+<div id="tab-manage" class="tab-content" style="display:none">
+      <div class="card">
+        <p style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:12px">新增單字</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-row" style="margin:0"><label>英文單字</label><input type="text" id="mWord" placeholder="e.g. grateful"></div>
+          <div class="form-row" style="margin:0"><label>音標（選填）</label><input type="text" id="mPhon" placeholder="e.g. /ˈɡreɪtfəl/"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-row" style="margin:0"><label>中文意思</label><input type="text" id="mMean" placeholder="e.g. 感激的"></div>
+          <div class="form-row" style="margin:0"><label>詞性</label><select id="mPos" style="width:100%;padding:8px 12px;border:1.5px solid #D3D1C7;border-radius:8px;font-size:14px;background:#F1EFE8;color:#2C2C2A"><option>adj. 形容詞</option><option>n. 名詞</option><option>v. 動詞</option><option>adv. 副詞</option><option>prep. 介系詞</option></select></div>
+        </div>
+        <div class="form-row"><label>例句（用 *單字* 標記）</label><textarea id="mEx" placeholder="She is a very *grateful* person." style="width:100%;padding:8px 12px;border:1.5px solid #D3D1C7;border-radius:8px;font-size:14px;background:#F1EFE8;color:#2C2C2A;resize:vertical;min-height:60px"></textarea></div>
+        <div class="form-row">
+          <label>難度</label>
+          <div class="level-row" style="margin-top:4px">
+            <button class="lbtn active" id="mL0" onclick="setMLevel(0)">國一</button>
+            <button class="lbtn" id="mL1" onclick="setMLevel(1)">國二</button>
+            <button class="lbtn" id="mL2" onclick="setMLevel(2)">國三</button>
+          </div>
+        </div>
+        <button class="btn-login" style="margin-top:4px" onclick="addWord()">新增到單字庫</button>
+        <p id="mMsg" style="font-size:13px;margin-top:8px;display:none"></p>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">我的單字庫</p>
+          <div class="level-row">
+            <button class="lbtn active" style="font-size:12px;padding:3px 10px" onclick="filterW(-1,this)">全部</button>
+            <button class="lbtn" style="font-size:12px;padding:3px 10px" onclick="filterW(0,this)">國一</button>
+            <button class="lbtn" style="font-size:12px;padding:3px 10px" onclick="filterW(1,this)">國二</button>
+            <button class="lbtn" style="font-size:12px;padding:3px 10px" onclick="filterW(2,this)">國三</button>
+          </div>
+        </div>
+        <div id="myWordList"></div>
+      </div>
+    </div>
+
+    <div id="tab-stats" class="tab-content">
+
+      <div class="card" id="dailyMissionCard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">今日任務</p>
+          <span style="font-size:12px;color:#888780" id="missionDate"></span>
+        </div>
+        <div id="missionVocabRow" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <span style="font-size:13px;font-weight:500;color:#2C2C2A">📖 單字練習</span>
+            <span style="font-size:13px;font-weight:600;color:#534AB7" id="mVocabCount">0 / 10</span>
+          </div>
+          <div style="background:#D3D1C7;border-radius:99px;height:10px;overflow:hidden">
+            <div id="mVocabBar" style="height:10px;border-radius:99px;width:0%;background:#534AB7;transition:width .5s"></div>
+          </div>
+        </div>
+        <div id="missionSpellRow" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <span style="font-size:13px;font-weight:500;color:#2C2C2A">✏️ 拼字練習</span>
+            <span style="font-size:13px;font-weight:600;color:#1D9E75" id="mSpellCount">0 / 10</span>
+          </div>
+          <div style="background:#D3D1C7;border-radius:99px;height:10px;overflow:hidden">
+            <div id="mSpellBar" style="height:10px;border-radius:99px;width:0%;background:#1D9E75;transition:width .5s"></div>
+          </div>
+        </div>
+        <div id="missionGramRow" style="margin-bottom:4px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <span style="font-size:13px;font-weight:500;color:#2C2C2A">📝 文法練習</span>
+            <span style="font-size:13px;font-weight:600;color:#BA7517" id="mGramCount">0 / 10</span>
+          </div>
+          <div style="background:#D3D1C7;border-radius:99px;height:10px;overflow:hidden">
+            <div id="mGramBar" style="height:10px;border-radius:99px;width:0%;background:#BA7517;transition:width .5s"></div>
+          </div>
+        </div>
+        <div id="allDoneMsg" style="display:none;margin-top:16px;text-align:center;padding:12px;background:#EEEDFE;border-radius:10px">
+          <div style="font-size:22px;margin-bottom:4px">🏆</div>
+          <div style="font-size:15px;font-weight:600;color:#3C3489">今日任務全部完成！</div>
+          <div style="font-size:13px;color:#534AB7;margin-top:2px">你真的太厲害了，繼續保持！</div>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-num" id="stD">0</div><div class="stat-lbl">練習天數</div></div>
+        <div class="stat-box"><div class="stat-num" id="stS">0</div><div class="stat-lbl">連續天數</div></div>
+        <div class="stat-box"><div class="stat-num" id="stA">—</div><div class="stat-lbl">答題正確率</div></div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-num" id="stV">0</div><div class="stat-lbl">單字練習</div></div>
+        <div class="stat-box"><div class="stat-num" id="stSp">0</div><div class="stat-lbl">拼字練習</div></div>
+        <div class="stat-box"><div class="stat-num" id="stG">0</div><div class="stat-lbl">文法練習</div></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">練習記錄</p>
+          <div style="display:flex;gap:6px">
+            <button id="chart7btn" class="lbtn active" style="font-size:12px;padding:3px 10px" onclick="setChartRange(7,this)">7天</button>
+            <button id="chart30btn" class="lbtn" style="font-size:12px;padding:3px 10px" onclick="setChartRange(30,this)">30天</button>
+          </div>
+        </div>
+        <div id="weekChart" style="display:flex;align-items:flex-end;gap:3px;height:80px;overflow-x:auto"></div>
+        <div id="weekLabels" style="display:flex;gap:3px;margin-top:4px;overflow-x:hidden"></div>
+        <div id="weekDates" style="display:flex;gap:3px;margin-top:2px;overflow-x:hidden"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">練習過的單字</p>
+          <span style="font-size:13px;color:#888780" id="practicedWordCount"></span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+          <button class="lbtn active" style="font-size:12px;padding:3px 10px" onclick="filterPracticed('all',this)">全部</button>
+          <button class="lbtn" style="font-size:12px;padding:3px 10px" onclick="filterPracticed('ok',this)">✓ 答對</button>
+          <button class="lbtn" style="font-size:12px;padding:3px 10px" onclick="filterPracticed('wrong',this)">✗ 答錯</button>
+        </div>
+        <div id="practicedWordList" style="max-height:300px;overflow-y:auto"></div>
+      </div>
+
+      <div id="reviewWrongCard" class="card" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <p style="font-size:15px;font-weight:600;color:#A32D2D">複習錯誤單字</p>
+          <span style="font-size:13px;color:#888780" id="reviewWrongCount"></span>
+        </div>
+        <div id="reviewWrongList" style="max-height:260px;overflow-y:auto;margin-bottom:12px"></div>
+        <button onclick="openWrongReview()" style="width:100%;padding:10px;background:#A32D2D;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">開始複習這些單字</button>
+      </div>
+
+      <!-- Grammar error stats -->
+      <div class="card" id="gramErrorCard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">文法錯誤統計</p>
+          <span style="font-size:12px;color:#888780" id="gramErrorCount"></span>
+        </div>
+        <div id="gramErrorList" style="margin-bottom:12px"></div>
+        <div id="gramReviewBtn" style="display:none">
+          <button onclick="startGramErrorReview()" style="width:100%;padding:10px;background:#BA7517;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">複習常錯文法類型</button>
+        </div>
+      </div>
+
+      <!-- CEFR Panel -->
+      <div class="card" id="cefrCard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">CEFR 程度設定</p>
+          <span id="cefrCurrentBadge" style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:#EEEDFE;color:#3C3489"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px" id="cefrGrid">
+          <div onclick="setCEFR('A1',this)" id="cefrBtn-A1" class="cefr-btn" style="border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;border:1.5px solid #D3D1C7;background:#fff">
+            <div style="font-size:16px;font-weight:600;color:#2C2C2A">A1</div>
+            <div style="font-size:11px;color:#888780;margin-top:2px">初學者</div>
+          </div>
+          <div onclick="setCEFR('A2',this)" id="cefrBtn-A2" class="cefr-btn" style="border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;border:1.5px solid #D3D1C7;background:#fff">
+            <div style="font-size:16px;font-weight:600;color:#2C2C2A">A2</div>
+            <div style="font-size:11px;color:#888780;margin-top:2px">基礎</div>
+          </div>
+          <div onclick="setCEFR('B1',this)" id="cefrBtn-B1" class="cefr-btn" style="border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;border:1.5px solid #D3D1C7;background:#fff">
+            <div style="font-size:16px;font-weight:600;color:#2C2C2A">B1</div>
+            <div style="font-size:11px;color:#888780;margin-top:2px">中級</div>
+          </div>
+          <div onclick="setCEFR('B2',this)" id="cefrBtn-B2" class="cefr-btn" style="border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;border:1.5px solid #D3D1C7;background:#fff">
+            <div style="font-size:16px;font-weight:600;color:#2C2C2A">B2</div>
+            <div style="font-size:11px;color:#888780;margin-top:2px">中高級</div>
+          </div>
+          <div onclick="setCEFR('C1',this)" id="cefrBtn-C1" class="cefr-btn" style="border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;border:1.5px solid #D3D1C7;background:#fff">
+            <div style="font-size:16px;font-weight:600;color:#2C2C2A">C1</div>
+            <div style="font-size:11px;color:#888780;margin-top:2px">高級</div>
+          </div>
+          <div onclick="setCEFR('C2',this)" id="cefrBtn-C2" class="cefr-btn" style="border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;border:1.5px solid #D3D1C7;background:#fff">
+            <div style="font-size:16px;font-weight:600;color:#2C2C2A">C2</div>
+            <div style="font-size:11px;color:#888780;margin-top:2px">精通</div>
+          </div>
+        </div>
+        <div id="cefrAdvice" style="background:#F1EFE8;border-radius:10px;padding:12px;font-size:13px;color:#5F5E5A;line-height:1.7;display:none"></div>
+      
+      <!-- Placement Test Entry -->
+      <div class="card" id="placementEntryCard" style="background:linear-gradient(135deg,#EEEDFE 0%,#F1EFE8 100%);border:1.5px solid #AFA9EC">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div style="font-size:32px">🎯</div>
+          <div>
+            <p style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:2px">CEFR 程度測驗</p>
+            <p style="font-size:12px;color:#5F5E5A">30 道題・精準判斷 A1〜C1・約 8 分鐘</p>
+          </div>
+        </div>
+        <div id="ptLastResult2" style="display:none;background:rgba(83,74,183,.12);border-radius:8px;padding:8px 12px;margin-bottom:12px">
+          <span style="font-size:12px;color:#888780">上次結果：</span>
+          <span style="font-size:14px;font-weight:600;color:#3C3489" id="ptLastScore2"></span>
+        </div>
+        <button onclick="openPlacementModal()" style="width:100%;padding:11px;background:#534AB7;color:#EEEDFE;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">開始測驗 →</button>
+      </div>
+
+</div>
+
+    </div>
+
+    <div id="tab-game" class="tab-content" style="display:none">
+
+      <!-- Game Selector -->
+      <div id="game-selector">
+        <p style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:12px">選擇遊戲</p>
+        <div style="display:grid;grid-template-columns:1fr;gap:10px">
+          <div onclick="openGame('mole')" style="background:#fff;border:1.5px solid #D3D1C7;border-radius:14px;padding:16px;cursor:pointer;display:flex;align-items:center;gap:14px">
+            <div style="font-size:36px;width:52px;text-align:center">🦔</div>
+            <div style="flex:1">
+              <div style="font-size:16px;font-weight:600;color:#2C2C2A;margin-bottom:2px">打地鼠</div>
+              <div style="font-size:13px;color:#888780">看中文，快點正確英文！限時計分，連擊加分</div>
+            </div>
+            <div style="font-size:20px;color:#D3D1C7">›</div>
+          </div>
+          <div onclick="openGame('flip')" style="background:#fff;border:1.5px solid #D3D1C7;border-radius:14px;padding:16px;cursor:pointer;display:flex;align-items:center;gap:14px">
+            <div style="font-size:36px;width:52px;text-align:center">🃏</div>
+            <div style="flex:1">
+              <div style="font-size:16px;font-weight:600;color:#2C2C2A;margin-bottom:2px">記憶翻牌配對</div>
+              <div style="font-size:13px;color:#888780">翻開卡牌，配對英文和中文意思，越快越好</div>
+            </div>
+            <div style="font-size:20px;color:#D3D1C7">›</div>
+          </div>
+          <div onclick="openGame('wordle')" style="background:#fff;border:1.5px solid #D3D1C7;border-radius:14px;padding:16px;cursor:pointer;display:flex;align-items:center;gap:14px">
+            <div style="font-size:36px;width:52px;text-align:center">🟩</div>
+            <div style="flex:1">
+              <div style="font-size:16px;font-weight:600;color:#2C2C2A;margin-bottom:2px">Wordle 猜字</div>
+              <div style="font-size:13px;color:#888780">根據提示猜出英文單字，綠黃灰告訴你對不對</div>
+            </div>
+            <div style="font-size:20px;color:#D3D1C7">›</div>
+          </div>
+          <div onclick="openGame('wordcross')" style="background:#fff;border:1.5px solid #D3D1C7;border-radius:14px;padding:16px;cursor:pointer;display:flex;align-items:center;gap:14px">
+            <div style="font-size:36px;width:52px;text-align:center">✏️</div>
+            <div style="flex:1">
+              <div style="font-size:16px;font-weight:600;color:#2C2C2A;margin-bottom:2px">Word Cross 填字</div>
+              <div style="font-size:13px;color:#888780">根據中文提示填入橫向和直向的英文單字</div>
+            </div>
+            <div style="font-size:20px;color:#D3D1C7">›</div>
+          </div>
+        </div>
+        <div class="card" id="gLeaderCard" style="margin-top:1rem;display:none">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A;margin-bottom:10px">🏅 個人最高紀錄</p>
+          <div id="gLeaderList"></div>
+        </div>
+      </div>
+
+      <!-- MOLE GAME -->
+      <div id="game-mole" style="display:none">
+        <div id="game-lobby">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <button onclick="backToGameSelector()" style="padding:5px 12px;font-size:13px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#5F5E5A;cursor:pointer">← 返回</button>
+            <span style="font-size:16px;font-weight:600;color:#2C2C2A">🦔 打地鼠</span>
+          </div>
+          <div class="card" style="text-align:center;padding:1.5rem">
+            <div style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;flex-wrap:wrap">
+              <button class="lbtn active" id="glv0" onclick="setGameLevel(0,this)">國一</button>
+              <button class="lbtn" id="glv1" onclick="setGameLevel(1,this)">國二</button>
+              <button class="lbtn" id="glv2" onclick="setGameLevel(2,this)">國三</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
+              <div style="background:#F1EFE8;border-radius:10px;padding:12px;cursor:pointer;border:2px solid transparent" id="gDiff0" onclick="setGameDiff(0)">
+                <div style="font-size:20px;margin-bottom:4px">🌱</div>
+                <div style="font-size:14px;font-weight:600;color:#2C2C2A">入門</div>
+                <div style="font-size:12px;color:#888780">3選項・60秒</div>
+              </div>
+              <div style="background:#EEEDFE;border-radius:10px;padding:12px;cursor:pointer;border:2px solid #534AB7" id="gDiff1" onclick="setGameDiff(1)">
+                <div style="font-size:20px;margin-bottom:4px">🔥</div>
+                <div style="font-size:14px;font-weight:600;color:#534AB7">標準</div>
+                <div style="font-size:12px;color:#3C3489">4選項・45秒</div>
+              </div>
+              <div style="background:#F1EFE8;border-radius:10px;padding:12px;cursor:pointer;border:2px solid transparent" id="gDiff2" onclick="setGameDiff(2)">
+                <div style="font-size:20px;margin-bottom:4px">⚡</div>
+                <div style="font-size:14px;font-weight:600;color:#2C2C2A">挑戰</div>
+                <div style="font-size:12px;color:#888780">5選項・35秒</div>
+              </div>
+              <div style="background:#F1EFE8;border-radius:10px;padding:12px;cursor:pointer;border:2px solid transparent" id="gDiff3" onclick="setGameDiff(3)">
+                <div style="font-size:20px;margin-bottom:4px">💀</div>
+                <div style="font-size:14px;font-weight:600;color:#2C2C2A">地獄</div>
+                <div style="font-size:12px;color:#888780">6選項・25秒</div>
+              </div>
+            </div>
+            <button id="startGameBtn" onclick="startGame()" style="width:100%;padding:13px;background:#534AB7;color:#EEEDFE;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer">開始遊戲！</button>
+          </div>
+        </div>
+
+      <div id="game-play" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:22px;font-weight:700;color:#534AB7" id="gScore">0</span>
+            <span style="font-size:13px;color:#888780">分</span>
+            <span style="font-size:13px;color:#E24B4A;font-weight:600" id="gCombo"></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px;color:#888780">剩餘</span>
+            <span style="font-size:20px;font-weight:700;color:#E24B4A" id="gTimer">45</span>
+            <span style="font-size:13px;color:#888780">秒</span>
+            <button onclick="endGame(true)" style="padding:4px 10px;font-size:12px;border:1px solid #D3D1C7;border-radius:8px;background:#fff;cursor:pointer;color:#888780">結束</button>
+          </div>
+        </div>
+        <div style="background:#D3D1C7;border-radius:99px;height:8px;margin-bottom:14px;overflow:hidden">
+          <div id="gTimerBar" style="height:8px;border-radius:99px;background:linear-gradient(90deg,#534AB7,#1D9E75);transition:width 1s linear;width:100%"></div>
+        </div>
+
+        <div class="card" style="text-align:center;min-height:100px;display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+          <div>
+            <div style="font-size:13px;color:#888780;margin-bottom:6px">這個中文意思的英文是？</div>
+            <div style="font-size:26px;font-weight:700;color:#3C3489" id="gQuestion">—</div>
+            <div style="font-size:13px;color:#AFA9EC;margin-top:4px" id="gHintPos"></div>
+          </div>
+        </div>
+
+        <div id="gMoles" style="display:grid;gap:10px"></div>
+
+        <div id="gFeedbackFlash" style="text-align:center;font-size:15px;font-weight:600;min-height:22px;margin-top:8px"></div>
+      </div>
+
+      <div id="game-over" style="display:none">
+        <div class="card" style="text-align:center;padding:2rem">
+          <div style="font-size:48px;margin-bottom:8px" id="goEmoji">🎉</div>
+          <div style="font-size:32px;font-weight:700;color:#534AB7;margin-bottom:4px" id="goScore">0</div>
+          <div style="font-size:14px;color:#888780;margin-bottom:4px">分</div>
+          <div style="font-size:16px;font-weight:600;color:#2C2C2A;margin-bottom:4px" id="goMsg"></div>
+          <div style="font-size:13px;color:#888780;margin-bottom:6px" id="goNew"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:16px 0">
+            <div style="background:#F1EFE8;border-radius:10px;padding:10px">
+              <div style="font-size:11px;color:#888780;margin-bottom:2px">答對</div>
+              <div style="font-size:20px;font-weight:700;color:#3B6D11" id="goCorrect">0</div>
+            </div>
+            <div style="background:#F1EFE8;border-radius:10px;padding:10px">
+              <div style="font-size:11px;color:#888780;margin-bottom:2px">答錯</div>
+              <div style="font-size:20px;font-weight:700;color:#A32D2D" id="goWrong">0</div>
+            </div>
+            <div style="background:#F1EFE8;border-radius:10px;padding:10px">
+              <div style="font-size:11px;color:#888780;margin-bottom:2px">最高連擊</div>
+              <div style="font-size:20px;font-weight:700;color:#534AB7" id="goCombo">0</div>
+            </div>
+          </div>
+          <div id="goMistakes" style="margin-bottom:16px;text-align:left;display:none">
+            <p style="font-size:13px;font-weight:600;color:#A32D2D;margin-bottom:8px">答錯的單字：</p>
+            <div id="goMistakeList"></div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button onclick="replayGame()" style="flex:1;padding:11px;background:#534AB7;color:#EEEDFE;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">再玩一次</button>
+            <button onclick="backToLobby()" style="flex:1;padding:11px;background:#F1EFE8;color:#5F5E5A;border:1.5px solid #D3D1C7;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer">返回選單</button>
+          </div>
+        </div>
+      </div>
+      </div><!-- end game-mole -->
+
+      <!-- FLIP CARD GAME -->
+      <div id="game-flip" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <button onclick="backToGameSelector()" style="padding:5px 12px;font-size:13px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#5F5E5A;cursor:pointer">← 返回</button>
+          <span style="font-size:16px;font-weight:600;color:#2C2C2A">🃏 記憶翻牌配對</span>
+        </div>
+        <div id="flip-lobby">
+          <div class="card" style="text-align:center;padding:1.5rem">
+            <div style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;flex-wrap:wrap">
+              <button class="lbtn active" id="flv0" onclick="setFlipLevel(0,this)">國一</button>
+              <button class="lbtn" id="flv1" onclick="setFlipLevel(1,this)">國二</button>
+              <button class="lbtn" id="flv2" onclick="setFlipLevel(2,this)">國三</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
+              <div id="fpairs0" onclick="setFlipPairs(6,this)" style="background:#E1F5EE;border:2px solid #1D9E75;border-radius:10px;padding:12px;cursor:pointer">
+                <div style="font-size:18px;margin-bottom:4px">🌱</div>
+                <div style="font-size:14px;font-weight:600;color:#085041">簡單</div>
+                <div style="font-size:12px;color:#1D9E75">6對 12張</div>
+              </div>
+              <div id="fpairs1" onclick="setFlipPairs(8,this)" style="background:#F1EFE8;border:2px solid transparent;border-radius:10px;padding:12px;cursor:pointer">
+                <div style="font-size:18px;margin-bottom:4px">🔥</div>
+                <div style="font-size:14px;font-weight:600;color:#2C2C2A">標準</div>
+                <div style="font-size:12px;color:#888780">8對 16張</div>
+              </div>
+              <div id="fpairs2" onclick="setFlipPairs(10,this)" style="background:#F1EFE8;border:2px solid transparent;border-radius:10px;padding:12px;cursor:pointer">
+                <div style="font-size:18px;margin-bottom:4px">⚡</div>
+                <div style="font-size:14px;font-weight:600;color:#2C2C2A">困難</div>
+                <div style="font-size:12px;color:#888780">10對 20張</div>
+              </div>
+              <div id="fpairs3" onclick="setFlipPairs(12,this)" style="background:#F1EFE8;border:2px solid transparent;border-radius:10px;padding:12px;cursor:pointer">
+                <div style="font-size:18px;margin-bottom:4px">💀</div>
+                <div style="font-size:14px;font-weight:600;color:#2C2C2A">地獄</div>
+                <div style="font-size:12px;color:#888780">12對 24張</div>
+              </div>
+            </div>
+            <button onclick="startFlip()" style="width:100%;padding:13px;background:#1D9E75;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer">開始翻牌！</button>
+          </div>
+        </div>
+        <div id="flip-play" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div style="display:flex;gap:12px;align-items:center">
+              <span style="font-size:13px;color:#888780">翻牌次數</span>
+              <span style="font-size:20px;font-weight:700;color:#1D9E75" id="fFlips">0</span>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center">
+              <span style="font-size:13px;color:#888780">配對</span>
+              <span style="font-size:18px;font-weight:700;color:#2C2C2A" id="fMatched">0</span><span style="font-size:13px;color:#888780">/</span><span style="font-size:18px;font-weight:700;color:#2C2C2A" id="fTotal">6</span>
+            </div>
+            <div style="font-size:16px;font-weight:700;color:#E24B4A" id="fTimer">0:00</div>
+          </div>
+          <div id="flipGrid" style="display:grid;gap:8px"></div>
+        </div>
+        <div id="flip-over" style="display:none">
+          <div class="card" style="text-align:center;padding:2rem">
+            <div style="font-size:44px;margin-bottom:8px">🎊</div>
+            <div style="font-size:22px;font-weight:700;color:#1D9E75;margin-bottom:4px" id="foTime"></div>
+            <div style="font-size:14px;color:#888780;margin-bottom:12px" id="foFlips"></div>
+            <div id="foNew" style="font-size:14px;font-weight:600;margin-bottom:16px"></div>
+            <div style="display:flex;gap:10px">
+              <button onclick="startFlip()" style="flex:1;padding:11px;background:#1D9E75;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">再玩一次</button>
+              <button onclick="backToGameSelector()" style="flex:1;padding:11px;background:#F1EFE8;color:#5F5E5A;border:1.5px solid #D3D1C7;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer">返回選單</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- end game-flip -->
+
+      <!-- WORDLE GAME -->
+      <div id="game-wordle" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <button onclick="backToGameSelector()" style="padding:5px 12px;font-size:13px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#5F5E5A;cursor:pointer">← 返回</button>
+          <span style="font-size:16px;font-weight:600;color:#2C2C2A">🟩 Wordle 猜字</span>
+        </div>
+        <div id="wordle-lobby">
+          <div class="card" style="text-align:center;padding:1.5rem">
+            <div style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;flex-wrap:wrap">
+              <button class="lbtn active" id="wlv0" onclick="setWordleLevel(0,this)">國一</button>
+              <button class="lbtn" id="wlv1" onclick="setWordleLevel(1,this)">國二</button>
+              <button class="lbtn" id="wlv2" onclick="setWordleLevel(2,this)">國三</button>
+            </div>
+            <div style="background:#F1EFE8;border-radius:10px;padding:12px;margin-bottom:16px;text-align:left">
+              <p style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:6px">遊戲規則</p>
+              <div style="font-size:13px;color:#5F5E5A">
+                <div style="margin-bottom:10px">根據中文提示猜出英文單字，有 6 次機會。</div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:28px;height:28px;background:#639922;color:#fff;border-radius:6px;font-size:13px;font-weight:600;align-items:center;justify-content:center;flex-shrink:0">A</span><span>字母正確且位置正確</span></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:28px;height:28px;background:#BA7517;color:#fff;border-radius:6px;font-size:13px;font-weight:600;align-items:center;justify-content:center;flex-shrink:0">A</span><span>字母正確但位置錯誤</span></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:28px;height:28px;background:#888780;color:#fff;border-radius:6px;font-size:13px;font-weight:600;align-items:center;justify-content:center;flex-shrink:0">A</span><span>字母不在單字中</span></div>
+                </div>
+              </div>
+            </div>
+            <button onclick="startWordle()" style="width:100%;padding:13px;background:#639922;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer">開始猜字！</button>
+          </div>
+        </div>
+        <div id="wordle-play" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div>
+              <div style="font-size:11px;color:#888780">中文提示</div>
+              <div style="font-size:18px;font-weight:700;color:#3C3489" id="wClue"></div>
+              <div style="font-size:12px;color:#888780" id="wPos"></div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;color:#888780">字母數</div>
+              <div style="font-size:22px;font-weight:700;color:#2C2C2A" id="wLen"></div>
+            </div>
+          </div>
+          <div id="wGrid" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+          <div id="wKbd" style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <input id="wInput" type="text" placeholder="輸入猜測…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1;padding:10px 14px;border:2px solid #D3D1C7;border-radius:10px;font-size:16px;font-weight:600;color:#2C2C2A;background:#fff;letter-spacing:2px;outline:none;font-family:monospace">
+            <button onclick="submitWordle()" style="padding:10px 18px;background:#639922;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">送出</button>
+          </div>
+          <p id="wFeedback" style="font-size:14px;font-weight:600;min-height:20px;text-align:center"></p>
+        </div>
+        <div id="wordle-over" style="display:none">
+          <div class="card" style="text-align:center;padding:2rem">
+            <div style="font-size:44px;margin-bottom:8px" id="woEmoji"></div>
+            <div style="font-size:18px;font-weight:700;color:#2C2C2A;margin-bottom:4px" id="woMsg"></div>
+            <div style="font-size:22px;font-weight:700;color:#639922;font-family:monospace;letter-spacing:3px;margin:10px 0" id="woAnswer"></div>
+            <div style="font-size:13px;color:#888780;margin-bottom:16px" id="woMeaning"></div>
+            <div style="display:flex;gap:10px">
+              <button onclick="startWordle()" style="flex:1;padding:11px;background:#639922;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">下一題</button>
+              <button onclick="backToGameSelector()" style="flex:1;padding:11px;background:#F1EFE8;color:#5F5E5A;border:1.5px solid #D3D1C7;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer">返回選單</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- end game-wordle -->
+
+      <!-- WORDCROSS GAME -->
+      <div id="game-wordcross" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <button onclick="backToGameSelector()" style="padding:5px 12px;font-size:13px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#5F5E5A;cursor:pointer">← 返回</button>
+          <span style="font-size:16px;font-weight:600;color:#2C2C2A">✏️ Word Cross 填字</span>
+        </div>
+        <div id="wc-lobby">
+          <div class="card" style="text-align:center;padding:1.5rem">
+            <div style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;flex-wrap:wrap">
+              <button class="lbtn active" id="wclv0" onclick="setWCLevel(0,this)">國一</button>
+              <button class="lbtn" id="wclv1" onclick="setWCLevel(1,this)">國二</button>
+              <button class="lbtn" id="wclv2" onclick="setWCLevel(2,this)">國三</button>
+            </div>
+            <div style="background:#F1EFE8;border-radius:10px;padding:12px;margin-bottom:16px;text-align:left">
+              <p style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:6px">遊戲說明</p>
+              <div style="font-size:13px;color:#5F5E5A;line-height:1.7">
+                點擊線索數字選取方向，在格子中輸入字母完成橫向和直向單字。<br>
+                格子高亮表示目前編輯的單字，黃色是交叉字母。
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:0">
+              <button onclick="startWC(false)" style="padding:13px;background:#D85A30;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">🕓 限時模式<div style="font-size:11px;font-weight:400;margin-top:2px;opacity:.85">計時計分・排行榜</div></button>
+              <button onclick="startWC(true)" style="padding:13px;background:#F1EFE8;color:#D85A30;border:1.5px solid #D85A30;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">☕ 悠閒模式<div style="font-size:11px;font-weight:400;margin-top:2px;opacity:.75">不計時・不計分</div></button>
+            </div>
+          </div>
+        </div>
+        <div id="wc-play" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <div style="font-size:13px;color:#888780" id="wcProgress">完成 0 / 0 個單字</div>
+              <div style="font-size:12px;color:#D85A30;font-weight:600" id="wcTimerDisplay" style="display:none"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button id="wcRevealBtn" onclick="wcRevealAll()" style="padding:5px 12px;font-size:12px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#888780;cursor:pointer">顯示答案</button>
+              <button onclick="startWC(wcRelaxMode)" style="padding:5px 12px;font-size:12px;border:1.5px solid #D85A30;border-radius:8px;background:#fff;color:#D85A30;cursor:pointer">重新生成</button>
+            </div>
+          </div>
+          <div id="wcGrid" style="display:flex;justify-content:center;margin-bottom:16px;overflow-x:auto"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" id="wcClues">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:8px">→ 橫向</div>
+              <div id="wcCluesAcross"></div>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:8px">↓ 直向</div>
+              <div id="wcCluesDown"></div>
+            </div>
+          </div>
+        </div>
+        <div id="wc-over" style="display:none">
+          <div class="card" style="text-align:center;padding:2rem">
+            <div style="font-size:44px;margin-bottom:8px">🎊</div>
+            <div style="font-size:20px;font-weight:600;color:#D85A30;margin-bottom:4px">填字完成！</div>
+            <div style="font-size:14px;color:#888780;margin-bottom:6px" id="wcOverTime"></div>
+            <div style="font-size:13px;color:#888780;margin-bottom:16px" id="wcOverNew"></div>
+            <div style="display:flex;gap:10px">
+              <button onclick="startWC()" style="flex:1;padding:11px;background:#D85A30;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">再來一題</button>
+              <button onclick="backToGameSelector()" style="flex:1;padding:11px;background:#F1EFE8;color:#5F5E5A;border:1.5px solid #D3D1C7;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer">返回選單</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- end game-wordcross -->
+
+    </div><!-- end tab-game -->
+
+
+    
+
+  </div><!-- end main-wrap -->
+</div><!-- end mainScreen -->
+</div>
+
+<script src="vocabulary.js" defer></script>
+
+<!-- PLACEMENT MODAL OVERLAY -->
+<div id="placementModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;overflow-y:auto;padding:1rem">
+  <div style="max-width:680px;margin:0 auto;background:#F1EFE8;border-radius:16px;padding:1rem;min-height:100%">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <span style="font-size:16px;font-weight:600;color:#2C2C2A">🎯 CEFR 程度測驗</span>
+      <button onclick="closePlacementModal()" style="padding:5px 12px;font-size:13px;border:1.5px solid #D3D1C7;border-radius:8px;background:#fff;color:#5F5E5A;cursor:pointer">✕ 關閉</button>
+    </div>
+    <div id="pm-home">
+      <div class="card" style="text-align:center;padding:2rem;margin-bottom:12px">
+        <div style="font-size:48px;margin-bottom:10px">🎯</div>
+        <h2 style="font-size:20px;font-weight:600;color:#2C2C2A;margin-bottom:8px">CEFR 程度測驗</h2>
+        <p style="font-size:13px;color:#888780;line-height:1.7;margin-bottom:6px">透過 30 道自適應題目，精準判斷你的英文程度（A1〜C1）。</p>
+        <p style="font-size:13px;color:#888780;margin-bottom:20px">測驗時間約 8〜10 分鐘，建議在安靜的環境中完成。</p>
+        <div style="background:#F1EFE8;border-radius:12px;padding:14px;margin-bottom:20px;text-align:left">
+          <div style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:8px">測驗包含：</div>
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:#5F5E5A">
+            <div>📖 詞彙理解（選出正確中文意思）</div>
+            <div>📝 文法判斷（選出正確句子）</div>
+            <div>🔡 句子完成（填入正確單字）</div>
+            <div>📚 閱讀理解（短文問答）</div>
+          </div>
+        </div>
+        <div id="ptLastResult" style="display:none;background:#EEEDFE;border-radius:10px;padding:12px;margin-bottom:16px">
+          <div style="font-size:12px;color:#888780;margin-bottom:4px">上次測驗結果</div>
+          <div style="font-size:18px;font-weight:600;color:#3C3489" id="ptLastScore"></div>
+        </div>
+        <button onclick="startPlacement()" style="width:100%;padding:14px;background:#534AB7;color:#EEEDFE;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer">開始測驗</button>
+      </div>
+    </div>
+    <div id="pm-test" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:13px;color:#888780" id="ptProgressText">題目 1 / 30</span>
+        <span style="font-size:13px;font-weight:600;color:#534AB7" id="ptCategory"></span>
+      </div>
+      <div style="background:#D3D1C7;border-radius:99px;height:6px;margin-bottom:16px;overflow:hidden">
+        <div id="ptProgressBar" style="height:6px;border-radius:99px;background:#534AB7;width:0%;transition:width .4s"></div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div style="font-size:14px;color:#888780;margin-bottom:8px" id="ptInstruction"></div>
+        <div style="font-size:17px;font-weight:600;color:#2C2C2A;line-height:1.6;margin-bottom:4px" id="ptStem"></div>
+        <div style="font-size:13px;color:#888780" id="ptContext"></div>
+      </div>
+      <div id="ptOpts" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+      <div id="ptFeedback" style="font-size:14px;font-weight:600;min-height:20px;text-align:center;margin-bottom:8px"></div>
+    </div>
+    <div id="pm-result" style="display:none">
+      <div class="card" style="text-align:center;padding:2rem;margin-bottom:12px">
+        <div style="font-size:52px;margin-bottom:10px" id="prEmoji">🎉</div>
+        <div style="font-size:14px;color:#888780;margin-bottom:4px">你的 CEFR 程度</div>
+        <div style="font-size:44px;font-weight:700;margin-bottom:2px" id="prLevel"></div>
+        <div style="font-size:18px;font-weight:600;margin-bottom:12px" id="prLevelName"></div>
+        <div style="background:#F1EFE8;border-radius:12px;padding:14px;text-align:left;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:6px">程度說明</div>
+          <div style="font-size:13px;color:#5F5E5A;line-height:1.7" id="prDesc"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+          <div style="background:#EEEDFE;border-radius:10px;padding:10px">
+            <div style="font-size:11px;color:#888780;margin-bottom:4px">詞彙</div>
+            <div style="font-size:18px;font-weight:600;color:#3C3489" id="prVocab">—</div>
+          </div>
+          <div style="background:#E1F5EE;border-radius:10px;padding:10px">
+            <div style="font-size:11px;color:#888780;margin-bottom:4px">文法</div>
+            <div style="font-size:18px;font-weight:600;color:#085041" id="prGram">—</div>
+          </div>
+          <div style="background:#FAEEDA;border-radius:10px;padding:10px">
+            <div style="font-size:11px;color:#888780;margin-bottom:4px">閱讀</div>
+            <div style="font-size:18px;font-weight:600;color:#633806" id="prRead">—</div>
+          </div>
+        </div>
+        <div style="background:#F1EFE8;border-radius:10px;padding:12px;margin-bottom:16px;text-align:left">
+          <div style="font-size:13px;font-weight:600;color:#2C2C2A;margin-bottom:6px">學習建議</div>
+          <div style="font-size:13px;color:#5F5E5A;line-height:1.7" id="prAdvice"></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button onclick="applyPlacementResult()" style="flex:1;padding:11px;background:#534AB7;color:#EEEDFE;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">套用此程度設定</button>
+          <button onclick="resetPlacement()" style="flex:1;padding:11px;background:#F1EFE8;color:#5F5E5A;border:1.5px solid #D3D1C7;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer">重新測驗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════ 複習錯誤單字 Modal ══════════════ -->
+<div id="wrongReviewOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;overflow-y:auto;padding:20px 0">
+  <div style="max-width:480px;margin:0 auto;background:#F5F4F0;border-radius:20px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.25)">
+
+    <!-- Header -->
+    <div id="wrHeader" style="background:#A32D2D;padding:18px 20px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:17px;font-weight:700;color:#fff">複習錯誤單字</div>
+        <div id="wrSubtitle" style="font-size:12px;color:rgba(255,255,255,0.8);margin-top:2px"></div>
+      </div>
+      <button onclick="closeWrongReview()" style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:32px;height:32px;font-size:18px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+
+    <!-- 首頁：選擇來源 -->
+    <div id="wrHome" style="padding:24px 20px">
+      <p style="font-size:14px;color:#5F5E5A;margin-bottom:16px">選擇要複習的錯誤類型：</p>
+      <div id="wrSourceBtns" style="display:flex;flex-direction:column;gap:10px"></div>
+      <button onclick="startWrongSession('all')" id="wrBtnAll" style="margin-top:16px;width:100%;padding:13px;background:#A32D2D;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">全部錯誤一起複習</button>
+      <p id="wrNoError" style="display:none;text-align:center;color:#888;font-size:14px;margin-top:12px">目前沒有錯誤記錄<br><span style="font-size:12px">繼續練習後這裡會顯示錯誤單字</span></p>
+    </div>
+
+    <!-- 練習區 (vocab 模式) -->
+    <div id="wrSession" style="display:none;padding:20px">
+      <!-- 進度 -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <span id="wrProgress" style="font-size:13px;color:#5F5E5A"></span>
+        <span id="wrScore" style="font-size:13px;font-weight:600;color:#A32D2D"></span>
+      </div>
+      <div style="height:4px;background:#E8E6E0;border-radius:2px;margin-bottom:18px">
+        <div id="wrProgressBar" style="height:4px;background:#A32D2D;border-radius:2px;transition:width 0.3s"></div>
+      </div>
+
+      <!-- 卡片 (vocab) -->
+      <div id="wrVocabCard" style="display:none">
+        <div style="background:#fff;border-radius:16px;padding:24px;margin-bottom:14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+          <div id="wrWord" style="font-size:28px;font-weight:800;color:#2C2C2A;letter-spacing:1px"></div>
+          <div id="wrPron" style="font-size:13px;color:#888;margin:4px 0 8px"></div>
+          <div id="wrPos" style="font-size:12px;color:#aaa"></div>
+        </div>
+        <div id="wrVocabChoices" style="display:flex;flex-direction:column;gap:9px"></div>
+      </div>
+
+      <!-- 卡片 (spell) -->
+      <div id="wrSpellCard" style="display:none">
+        <div style="background:#fff;border-radius:16px;padding:20px 24px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+          <div id="wrSpellZh" style="font-size:20px;font-weight:700;color:#2C2C2A;text-align:center;margin-bottom:4px"></div>
+          <div id="wrSpellPos" style="font-size:12px;color:#aaa;text-align:center;margin-bottom:12px"></div>
+          <div id="wrSpellHint" style="font-size:13px;color:#888;text-align:center;margin-bottom:12px"></div>
+          <input id="wrSpellInput" type="text" placeholder="輸入拼字…"
+            style="width:100%;box-sizing:border-box;padding:12px;border:2px solid #E0DDD6;border-radius:10px;font-size:16px;text-align:center;outline:none"
+            onkeydown="if(event.key==='Enter')checkWrSpell()">
+          <button onclick="checkWrSpell()" style="margin-top:10px;width:100%;padding:11px;background:#2E4057;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">確認</button>
+        </div>
+        <div id="wrSpellFeedback" style="display:none;background:#fff;border-radius:12px;padding:14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+          <div id="wrSpellAnswer" style="font-size:18px;font-weight:700;margin-bottom:4px"></div>
+          <div id="wrSpellEx" style="font-size:13px;color:#5F5E5A"></div>
+        </div>
+      </div>
+
+      <!-- 回饋 -->
+      <div id="wrFeedback" style="display:none;padding:14px 16px;border-radius:12px;margin-bottom:14px;text-align:center">
+        <div id="wrFeedbackIcon" style="font-size:24px"></div>
+        <div id="wrFeedbackText" style="font-size:14px;font-weight:600;margin-top:4px"></div>
+        <div id="wrFeedbackWord" style="font-size:13px;color:#5F5E5A;margin-top:2px"></div>
+      </div>
+
+      <!-- 下一題 -->
+      <button id="wrNextBtn" onclick="wrNext()" style="display:none;width:100%;padding:13px;background:#2E4057;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">下一題 →</button>
+    </div>
+
+    <!-- 輪次結束 -->
+    <div id="wrRoundEnd" style="display:none;padding:28px 20px;text-align:center">
+      <div style="font-size:48px;margin-bottom:12px" id="wrEndIcon"></div>
+      <div style="font-size:20px;font-weight:700;color:#2C2C2A;margin-bottom:6px" id="wrEndTitle"></div>
+      <div style="font-size:14px;color:#5F5E5A;margin-bottom:20px" id="wrEndMsg"></div>
+      <div id="wrStillWrong" style="display:none;background:#FFF3CD;border-radius:12px;padding:14px;margin-bottom:16px;text-align:left">
+        <div style="font-size:13px;font-weight:600;color:#856404;margin-bottom:8px">⚠️ 仍有錯誤的單字：</div>
+        <div id="wrStillWrongList" style="font-size:13px;color:#5F5E5A"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button id="wrContinueBtn" onclick="continueWrongReview()" style="width:100%;padding:13px;background:#A32D2D;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">再練一輪</button>
+        <button onclick="closeWrongReview()" style="width:100%;padding:13px;background:#E8E6E0;color:#2C2C2A;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">結束複習</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
