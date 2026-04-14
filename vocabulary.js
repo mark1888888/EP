@@ -2124,7 +2124,7 @@ const GRAMMAR=[
   {lv:2,topic:"時態一致",stem:"He said that he ___ very tired.",opts:["is","will be","was","has been"],ans:2,explain:"主句是過去式 said，從句時態退一格，用 was。"},
 ];
 
-let currentUser="",currentUserDisplay="",currentUserId="",currentUserGrade="国一",vLevel=0,vIdx=0,vAnswered=[],vScore=0,vRevealed=[],vPool=[],vAutoTimer=null,autoNext=true,vocabTabActive=false;
+let currentUser="",currentUserDisplay="",currentUserId="",currentUserHash="",currentUserGrade="国一",vLevel=0,vIdx=0,vAnswered=[],vScore=0,vRevealed=[],vPool=[],vAutoTimer=null,autoNext=true,vocabTabActive=false;
 let sLevel=0,sIdx=0,sAnswered=[],sScore=0,sPool=[],sHinted=[],sAutoNext=true,sAutoTimer=null;
 let gLevel=0,gIdx=0,gAnswered=[],gScore=0,gPool=[],gAutoNext=true,gAutoTimer=null;
 let mLevel=0,myWords=[],myFilter=-1,todaySeenWords={};
@@ -2206,6 +2206,7 @@ async function doLogin(){
     currentUser        = u;
     currentUserDisplay = user.display_name;
     currentUserId      = user.id;
+    currentUserHash    = hash;   // 儲存 hash 供後續 DB 操作
     currentUserGrade   = user.grade;
     initMain();
 
@@ -2305,10 +2306,96 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 function doLogout(){
-  currentUser=''; currentUserDisplay=''; currentUserId=''; currentUserGrade='';
+  // 登出前強制同步一次
+  if(currentUser && currentUserHash) _dbSaveNow();
+  currentUser=''; currentUserDisplay=''; currentUserId=''; currentUserHash=''; currentUserGrade='';
+  if(_dbSaveTimer) clearTimeout(_dbSaveTimer);
   showScreen("loginScreen");
   S("lu").value=""; S("lp").value="";
   switchLoginTab('login');
+}
+
+// ── 資料庫進度同步 ────────────────────────────────────────────
+let _dbSaveTimer = null;
+
+// 從資料庫載入進度，合併到目前狀態（登入後呼叫）
+async function syncFromDB(){
+  if(!currentUser || !currentUserHash) return;
+  try{
+    const resp = await fetch(SUPABASE_URL+'/rest/v1/rpc/get_progress',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({p_username:currentUser, p_hash:currentUserHash})
+    });
+    if(!resp.ok) return;
+    const rows = await resp.json();
+    if(!rows || rows.length===0){
+      // 資料庫沒有進度 → 把本機資料上傳
+      _dbSaveNow();
+      return;
+    }
+    const dbData = rows[0];
+    const localRaw = localStorage.getItem('engapp4_'+currentUser);
+    const localTs  = localRaw ? (JSON.parse(localRaw).dbSavedAt||0) : 0;
+    const dbTs     = dbData.last_updated ? new Date(dbData.last_updated).getTime() : 0;
+
+    if(dbTs > localTs){
+      // 資料庫比本機新 → 用資料庫的覆蓋本機
+      myWords        = dbData.my_words  || [];
+      stats          = Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,
+                        week:new Array(30).fill(0),tV_today:0,tS_today:0,tG_today:0,
+                        cV_today:0,cS_today:0,cG_today:0,gramErrors:{},cefrLevel:'',
+                        gradeSetting:'',placementResult:null}, dbData.stats||{});
+      todaySeenWords = dbData.today_seen|| {};
+      // 確保 week 陣列足夠長
+      if(!stats.week||stats.week.length<30) stats.week=new Array(30).fill(0);
+      saveData(); // 更新本機 cache
+      // 刷新 UI
+      S('userLabel').textContent = currentUserDisplay||currentUser;
+      S('streakLabel').textContent = '🔥 '+stats.streak+'天';
+      renderStats && renderStats();
+      renderMyWords && renderMyWords();
+    } else {
+      // 本機比資料庫新 → 上傳本機資料
+      _dbSaveNow();
+    }
+  }catch(e){
+    console.warn('syncFromDB error:',e);
+  }
+}
+
+// 立即儲存到資料庫
+async function _dbSaveNow(){
+  if(!currentUser || !currentUserHash) return;
+  try{
+    await fetch(SUPABASE_URL+'/rest/v1/rpc/save_progress',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        p_username:   currentUser,
+        p_hash:       currentUserHash,
+        p_my_words:   myWords,
+        p_stats:      stats,
+        p_today_seen: todaySeenWords
+      })
+    });
+  }catch(e){
+    console.warn('_dbSaveNow error:',e);
+  }
+}
+
+// 防抖動：資料變動後 3 秒再存到 DB（避免每次答題都打 API）
+function _scheduleDBSave(){
+  if(_dbSaveTimer) clearTimeout(_dbSaveTimer);
+  _dbSaveTimer = setTimeout(_dbSaveNow, 3000);
 }
 
 function initMain(){
@@ -2331,6 +2418,8 @@ function initMain(){
     S("levelBadge").textContent=LV[lv];
   }
   initVocab();initSpell();initGrammar();renderMyWords();renderStats();
+  // 背景從資料庫同步進度（不阻塞 UI）
+  syncFromDB();
   // Show last placement result if exists
   if(stats.placementResult){
     const pl=S("ptLastResult"),ps=S("ptLastScore");
@@ -2356,7 +2445,12 @@ stats=Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new
     }
   }catch(e){myWords=[];todaySeenWords={};stats={totalDays:1,streak:1,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:[0,0,0,0,0,0,0]}}
 }
-function saveData(today){localStorage.setItem("engapp4_"+currentUser,JSON.stringify({myWords,stats,todaySeenWords,lastDay:today||new Date().toDateString()}))}
+function saveData(today){
+  const payload={myWords,stats,todaySeenWords,lastDay:today||new Date().toDateString(),dbSavedAt:Date.now()};
+  localStorage.setItem("engapp4_"+currentUser,JSON.stringify(payload));
+  // 排程寫入資料庫（3秒防抖）
+  _scheduleDBSave();
+}
 
 function switchTab(name,btn){
   // 'vocab','spell','grammar','reading' now live inside 'practice'
