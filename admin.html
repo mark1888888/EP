@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理員後台 — 英文單字練習 v8</title>
+<!-- Supabase JS Client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+/* ── Reset & Base ────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#F1EFE8;min-height:100vh;padding:1.5rem}
+
+/* ── Layout ──────────────────────────────────────────────── */
+.wrap{max-width:900px;margin:0 auto}
+.card{background:#fff;border:1px solid #D3D1C7;border-radius:16px;padding:1.8rem;margin-bottom:1.2rem}
+
+/* ── Header ──────────────────────────────────────────────── */
+.site-header{background:#3C3489;color:#fff;border-radius:14px;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem}
+.site-header h1{font-size:18px;font-weight:700}
+.site-header span{font-size:13px;opacity:.8}
+
+/* ── Login form ──────────────────────────────────────────── */
+.login-box{max-width:360px;margin:80px auto 0}
+.login-box h2{text-align:center;font-size:20px;font-weight:700;color:#2C2C2A;margin-bottom:6px}
+.login-box p{text-align:center;font-size:13px;color:#888;margin-bottom:1.5rem}
+.form-row{margin-bottom:12px}
+.form-row label{display:block;font-size:13px;color:#5F5E5A;margin-bottom:5px;font-weight:500}
+.form-row input{width:100%;padding:10px 14px;border:1.5px solid #D3D1C7;border-radius:8px;font-size:15px;background:#f9f8f5;color:#2C2C2A;outline:none}
+.form-row input:focus{border-color:#534AB7;background:#fff}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;transition:opacity .15s}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:#534AB7;color:#fff}
+.btn-primary:hover:not(:disabled){background:#3C3489}
+.btn-success{background:#1D9E75;color:#fff}
+.btn-success:hover:not(:disabled){background:#0f7055}
+.btn-danger{background:#c0392b;color:#fff}
+.btn-danger:hover:not(:disabled){background:#96281b}
+.btn-ghost{background:#eee;color:#333}
+.btn-ghost:hover:not(:disabled){background:#ddd}
+.btn-full{width:100%;justify-content:center;padding:11px 0;font-size:15px;margin-top:4px}
+.btn-sm{padding:4px 10px;font-size:12px}
+
+/* ── Alerts ──────────────────────────────────────────────── */
+.alert{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;display:none}
+.alert-err{background:#FCEBEB;color:#A32D2D;border:1px solid #f5c6c6}
+.alert-suc{background:#E1F5EE;color:#085041;border:1px solid #b7e8d5}
+
+/* ── Status Tabs ─────────────────────────────────────────── */
+.stabs{display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap}
+.stab{padding:6px 16px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid #D3D1C7;background:#f5f4f0;color:#5F5E5A;transition:all .2s}
+.stab.active{background:#3C3489;color:#fff;border-color:#3C3489}
+
+/* ── Table ───────────────────────────────────────────────── */
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{background:#f0eeea;color:#5F5E5A;font-weight:600;text-align:left;padding:9px 12px;border-bottom:2px solid #D3D1C7;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+.tbl td{padding:10px 12px;border-bottom:1px solid #E8E6E0;color:#2C2C2A;vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:#faf9f6}
+
+/* ── Badges ──────────────────────────────────────────────── */
+.badge{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700}
+.badge-pending{background:#FEF3CD;color:#7A5200}
+.badge-approved{background:#E1F5EE;color:#085041}
+.badge-rejected{background:#FCEBEB;color:#A32D2D}
+.badge-admin{background:#EEEDFE;color:#3C3489}
+.badge-grade{background:#f0eeea;color:#5F5E5A}
+
+/* ── Stat cards ──────────────────────────────────────────── */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:1.2rem}
+.stat-card{background:#fff;border:1px solid #D3D1C7;border-radius:12px;padding:16px 20px;text-align:center}
+.stat-num{font-size:28px;font-weight:700;color:#3C3489}
+.stat-label{font-size:12px;color:#5F5E5A;margin-top:4px}
+
+/* ── Loading ─────────────────────────────────────────────── */
+.loading{text-align:center;padding:2rem;color:#888;font-size:14px}
+.spinner{display:inline-block;width:20px;height:20px;border:2.5px solid #D3D1C7;border-top-color:#534AB7;border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Empty state ─────────────────────────────────────────── */
+.empty{text-align:center;padding:2.5rem;color:#888;font-size:14px}
+.empty-icon{font-size:36px;margin-bottom:8px}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media(max-width:600px){
+  .tbl th,.tbl td{padding:7px 8px;font-size:12px}
+  .btn-sm{padding:4px 7px;font-size:11px}
+  .stats-row{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ── 登入畫面 ────────────────────────────────────────────── -->
+<div id="screenLogin">
+  <div class="login-box card">
+    <div style="text-align:center;font-size:36px;margin-bottom:12px">🔐</div>
+    <h2>管理員後台</h2>
+    <p>英文單字練習 v8 · 帳號審核系統</p>
+    <div id="alerr" class="alert alert-err"></div>
+    <div class="form-row"><label>管理員帳號</label><input type="text" id="alu" placeholder="admin" autocomplete="username"></div>
+    <div class="form-row"><label>管理員密碼</label><input type="password" id="alp" placeholder="輸入密碼" autocomplete="current-password"></div>
+    <button id="btnALogin" class="btn btn-primary btn-full" onclick="adminLogin()">登入後台</button>
+  </div>
+</div>
+
+<!-- ── 後台主畫面 ──────────────────────────────────────────── -->
+<div id="screenMain" style="display:none">
+
+  <!-- Header -->
+  <div class="site-header">
+    <div>
+      <h1>🔐 管理員後台</h1>
+      <span>英文單字練習 v8</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="adminLabel" style="font-size:13px;opacity:.9"></span>
+      <button class="btn btn-ghost btn-sm" onclick="adminLogout()">登出</button>
+    </div>
+  </div>
+
+  <!-- 統計卡片 -->
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card"><div class="stat-num" id="stTotal">-</div><div class="stat-label">總使用者</div></div>
+    <div class="stat-card"><div class="stat-num" id="stPending" style="color:#7A5200">-</div><div class="stat-label">待審核</div></div>
+    <div class="stat-card"><div class="stat-num" id="stApproved" style="color:#085041">-</div><div class="stat-label">已批准</div></div>
+    <div class="stat-card"><div class="stat-num" id="stRejected" style="color:#A32D2D">-</div><div class="stat-label">已拒絕</div></div>
+  </div>
+
+  <!-- 全域訊息 -->
+  <div id="mainAlert" class="alert" style="margin-bottom:12px"></div>
+
+  <!-- 使用者列表 -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
+      <h2 style="font-size:17px;font-weight:700;color:#2C2C2A">使用者管理</h2>
+      <button class="btn btn-ghost btn-sm" onclick="loadUsers()">🔄 重新整理</button>
+    </div>
+
+    <!-- 篩選 Tab -->
+    <div class="stabs">
+      <button class="stab active" onclick="filterUsers('all',this)">全部</button>
+      <button class="stab" onclick="filterUsers('pending',this)">待審核</button>
+      <button class="stab" onclick="filterUsers('approved',this)">已批准</button>
+      <button class="stab" onclick="filterUsers('rejected',this)">已拒絕</button>
+    </div>
+
+    <!-- 表格 -->
+    <div id="userTableWrap">
+      <div class="loading"><span class="spinner"></span>載入中…</div>
+    </div>
+  </div>
+
+</div><!-- end screenMain -->
+</div><!-- end wrap -->
+
+<script>
+// ── Supabase 設定（與 vocabulary.js 相同）────────────────────
+const SUPABASE_URL      = 'https://npoywbdzyydygkrjyilw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_MWiMxUtglsKLzF-pDZqDLw_FA_go-ho';
+
+let _sb = null;
+function getSB(){
+  if(!_sb && window.supabase){
+    _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return _sb;
+}
+
+// SHA-256 hash
+async function sha256(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// ── State ────────────────────────────────────────────────────
+let adminUsername = '';
+let adminHash     = '';
+let allUsers      = [];
+let currentFilter = 'all';
+
+// ── Helper ───────────────────────────────────────────────────
+function S(id){ return document.getElementById(id); }
+function showAlert(id, msg, type='err'){
+  const el=S(id);
+  el.className='alert alert-'+(type==='ok'?'suc':'err');
+  el.textContent=msg; el.style.display='block';
+  if(type==='ok') setTimeout(()=>el.style.display='none', 3000);
+}
+
+// ── 登入後台 ─────────────────────────────────────────────────
+async function adminLogin(){
+  const u=S('alu').value.trim(), p=S('alp').value.trim();
+  if(!u||!p){showAlert('alerr','請輸入帳號和密碼');return;}
+
+  const btn=S('btnALogin');
+  btn.disabled=true; btn.textContent='登入中…';
+
+  try{
+    const sb=getSB();
+    if(!sb){showAlert('alerr','無法連線 Supabase，請確認 URL / Key 設定');return;}
+
+    const hash = await sha256(p);
+    const {data, error} = await sb.rpc('verify_login',{p_username:u, p_hash:hash});
+
+    if(error){showAlert('alerr','登入失敗：'+error.message);return;}
+    if(!data||data.length===0){showAlert('alerr','帳號或密碼錯誤');return;}
+
+    const user = data[0];
+    if(!user.is_admin){showAlert('alerr','此帳號沒有管理員權限');return;}
+    if(user.status!=='approved'){showAlert('alerr','帳號尚未啟用');return;}
+
+    adminUsername = u;
+    adminHash     = hash;
+    S('adminLabel').textContent = '管理員：' + (user.display_name||u);
+    S('screenLogin').style.display = 'none';
+    S('screenMain').style.display  = 'block';
+    await loadUsers();
+
+  }catch(e){
+    showAlert('alerr','網路錯誤：'+e.message);
+  }finally{
+    btn.disabled=false; btn.textContent='登入後台';
+  }
+}
+
+function adminLogout(){
+  adminUsername=''; adminHash=''; allUsers=[];
+  S('screenMain').style.display='none';
+  S('screenLogin').style.display='block';
+  S('alu').value=''; S('alp').value='';
+  S('alerr').style.display='none';
+}
+
+// ── 載入使用者列表 ────────────────────────────────────────────
+async function loadUsers(){
+  S('userTableWrap').innerHTML='<div class="loading"><span class="spinner"></span>載入中…</div>';
+  S('mainAlert').style.display='none';
+
+  try{
+    const sb=getSB();
+    const {data,error} = await sb.rpc('admin_list_users',{
+      p_admin_username: adminUsername,
+      p_admin_hash:     adminHash
+    });
+
+    if(error){showAlert('mainAlert','載入失敗：'+error.message);S('userTableWrap').innerHTML='';return;}
+
+    allUsers = data||[];
+    updateStats();
+    renderTable(currentFilter);
+
+  }catch(e){
+    showAlert('mainAlert','網路錯誤：'+e.message);
+    S('userTableWrap').innerHTML='';
+  }
+}
+
+function updateStats(){
+  S('stTotal').textContent   = allUsers.length;
+  S('stPending').textContent = allUsers.filter(u=>u.status==='pending').length;
+  S('stApproved').textContent= allUsers.filter(u=>u.status==='approved').length;
+  S('stRejected').textContent= allUsers.filter(u=>u.status==='rejected').length;
+}
+
+function filterUsers(filter, btn){
+  currentFilter = filter;
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  renderTable(filter);
+}
+
+function renderTable(filter){
+  const users = filter==='all' ? allUsers : allUsers.filter(u=>u.status===filter);
+
+  if(users.length===0){
+    S('userTableWrap').innerHTML=`
+      <div class="empty">
+        <div class="empty-icon">📭</div>
+        <div>沒有${filter==='pending'?'待審核的':''}使用者</div>
+      </div>`;
+    return;
+  }
+
+  const rows = users.map(u=>{
+    const created = new Date(u.created_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const approved = u.approved_at ? new Date(u.approved_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'}) : '-';
+
+    const statusBadge = {
+      pending:  '<span class="badge badge-pending">待審核</span>',
+      approved: '<span class="badge badge-approved">已批准</span>',
+      rejected: '<span class="badge badge-rejected">已拒絕</span>',
+    }[u.status] || u.status;
+
+    const adminBadge = u.is_admin ? '<span class="badge badge-admin" style="margin-left:4px">管理員</span>':'';
+
+    // Action buttons
+    let actions = '';
+    if(u.is_admin){
+      actions = '<span style="color:#aaa;font-size:12px">系統帳號</span>';
+    } else if(u.status==='pending'){
+      actions = `
+        <button class="btn btn-success btn-sm" onclick="updateStatus('${u.id}','approved')">✅ 批准</button>
+        <button class="btn btn-danger btn-sm" onclick="updateStatus('${u.id}','rejected')">❌ 拒絕</button>`;
+    } else if(u.status==='approved'){
+      actions = `
+        <button class="btn btn-danger btn-sm" onclick="updateStatus('${u.id}','rejected')">❌ 停用</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteUser('${u.id}','${escapeHtml(u.display_name)}')">🗑 刪除</button>`;
+    } else if(u.status==='rejected'){
+      actions = `
+        <button class="btn btn-success btn-sm" onclick="updateStatus('${u.id}','approved')">✅ 重新批准</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteUser('${u.id}','${escapeHtml(u.display_name)}')">🗑 刪除</button>`;
+    }
+
+    return `
+      <tr>
+        <td><strong>${escapeHtml(u.display_name)}</strong>${adminBadge}</td>
+        <td style="color:#5F5E5A;font-size:12px">${escapeHtml(u.username)}</td>
+        <td><span class="badge badge-grade">${escapeHtml(u.grade)}</span></td>
+        <td>${statusBadge}</td>
+        <td style="font-size:12px;color:#888">${created}</td>
+        <td style="font-size:12px;color:#888">${approved}</td>
+        <td style="white-space:nowrap;display:flex;gap:5px">${actions}</td>
+      </tr>`;
+  }).join('');
+
+  S('userTableWrap').innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>姓名</th>
+            <th>帳號</th>
+            <th>年級</th>
+            <th>狀態</th>
+            <th>申請時間</th>
+            <th>批准時間</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── 更新使用者狀態 ────────────────────────────────────────────
+async function updateStatus(userId, newStatus){
+  const sb=getSB();
+  const label = {approved:'批准',rejected:'拒絕'}[newStatus];
+  try{
+    const {data,error} = await sb.rpc('admin_update_status',{
+      p_admin_username: adminUsername,
+      p_admin_hash:     adminHash,
+      p_target_id:      userId,
+      p_new_status:     newStatus
+    });
+    if(error){showAlert('mainAlert','操作失敗：'+error.message);return;}
+    if(data!=='ok'){showAlert('mainAlert','操作失敗：'+data);return;}
+
+    showAlert('mainAlert','已成功'+(label==='批准'?'批准':'拒絕')+'帳號 ✅','ok');
+    await loadUsers();
+  }catch(e){
+    showAlert('mainAlert','網路錯誤：'+e.message);
+  }
+}
+
+// ── 刪除使用者 ────────────────────────────────────────────────
+async function deleteUser(userId, displayName){
+  if(!confirm(`確定要刪除使用者「${displayName}」嗎？此操作無法還原。`)) return;
+
+  const sb=getSB();
+  try{
+    const {data,error} = await sb.rpc('admin_delete_user',{
+      p_admin_username: adminUsername,
+      p_admin_hash:     adminHash,
+      p_target_id:      userId
+    });
+    if(error){showAlert('mainAlert','刪除失敗：'+error.message);return;}
+    showAlert('mainAlert','已成功刪除使用者 ✅','ok');
+    await loadUsers();
+  }catch(e){
+    showAlert('mainAlert','網路錯誤：'+e.message);
+  }
+}
+
+// ── 按 Enter 登入 ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  S('alp').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin()});
+});
+</script>
+</body>
+</html>
