@@ -176,6 +176,24 @@ async function sha256(str){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+// 統一 fetch 呼叫 Supabase RPC（相容新版 publishable key）
+async function sbRpc(funcName, params){
+  const resp = await fetch(SUPABASE_URL+'/rest/v1/rpc/'+funcName,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization':'Bearer '+SUPABASE_ANON_KEY
+    },
+    body: JSON.stringify(params)
+  });
+  const text = await resp.text();
+  let data;
+  try{ data = JSON.parse(text); }catch(_){ data = text; }
+  if(!resp.ok) return {data:null, error:{message: (data&&data.message)||text||resp.status}};
+  return {data, error:null};
+}
+
 // ── State ────────────────────────────────────────────────────
 let adminUsername = '';
 let adminHash     = '';
@@ -204,7 +222,7 @@ async function adminLogin(){
     if(!sb){showAlert('alerr','無法連線 Supabase，請確認 URL / Key 設定');return;}
 
     const hash = await sha256(p);
-    const {data, error} = await sb.rpc('verify_login',{p_username:u, p_hash:hash});
+    const {data, error} = await sbRpc('verify_login',{p_username:u, p_hash:hash});
 
     if(error){showAlert('alerr','登入失敗：'+error.message);return;}
     if(!data||data.length===0){showAlert('alerr','帳號或密碼錯誤');return;}
@@ -241,8 +259,7 @@ async function loadUsers(){
   S('mainAlert').style.display='none';
 
   try{
-    const sb=getSB();
-    const {data,error} = await sb.rpc('admin_list_users',{
+    const {data,error} = await sbRpc('admin_list_users',{
       p_admin_username: adminUsername,
       p_admin_hash:     adminHash
     });
@@ -352,10 +369,9 @@ function escapeHtml(s){
 
 // ── 更新使用者狀態 ────────────────────────────────────────────
 async function updateStatus(userId, newStatus){
-  const sb=getSB();
   const label = {approved:'批准',rejected:'拒絕'}[newStatus];
   try{
-    const {data,error} = await sb.rpc('admin_update_status',{
+    const {data,error} = await sbRpc('admin_update_status',{
       p_admin_username: adminUsername,
       p_admin_hash:     adminHash,
       p_target_id:      userId,
@@ -375,9 +391,8 @@ async function updateStatus(userId, newStatus){
 async function deleteUser(userId, displayName){
   if(!confirm(`確定要刪除使用者「${displayName}」嗎？此操作無法還原。`)) return;
 
-  const sb=getSB();
   try{
-    const {data,error} = await sb.rpc('admin_delete_user',{
+    const {data,error} = await sbRpc('admin_delete_user',{
       p_admin_username: adminUsername,
       p_admin_hash:     adminHash,
       p_target_id:      userId
@@ -392,8 +407,4 @@ async function deleteUser(userId, displayName){
 
 // ── 按 Enter 登入 ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded',()=>{
-  S('alp').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin()});
-});
-</script>
-</body>
-</html>
+  S('alp').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin()}

@@ -35,7 +35,13 @@
         <!-- ── 登入表單 ── -->
         <div id="loginForm">
           <div class="form-row"><label>帳號</label><input type="text" id="lu" placeholder="輸入帳號" autocomplete="username"></div>
-          <div class="form-row"><label>密碼</label><input type="password" id="lp" placeholder="輸入密碼" autocomplete="current-password"></div>
+          <div class="form-row">
+            <label>密碼</label>
+            <div class="pw-wrap">
+              <input type="password" id="lp" placeholder="輸入密碼" autocomplete="current-password">
+              <button type="button" class="pw-eye" onclick="togglePw('lp',this)" tabindex="-1">👁</button>
+            </div>
+          </div>
           <p id="lerr" class="err-msg" style="display:none">帳號或密碼錯誤，請再試一次</p>
           <button id="btnLogin" class="btn-login" onclick="doLogin()">登入</button>
         </div>
@@ -52,8 +58,20 @@
               <option value="國三">國三</option>
             </select>
           </div>
-          <div class="form-row"><label>密碼</label><input type="password" id="rp" placeholder="至少 6 個字元" autocomplete="new-password"></div>
-          <div class="form-row"><label>確認密碼</label><input type="password" id="rp2" placeholder="再輸入一次密碼" autocomplete="new-password"></div>
+          <div class="form-row">
+            <label>密碼</label>
+            <div class="pw-wrap">
+              <input type="password" id="rp" placeholder="至少 6 個字元" autocomplete="new-password">
+              <button type="button" class="pw-eye" onclick="togglePw('rp',this)" tabindex="-1">👁</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>確認密碼</label>
+            <div class="pw-wrap">
+              <input type="password" id="rp2" placeholder="再輸入一次密碼" autocomplete="new-password">
+              <button type="button" class="pw-eye" onclick="togglePw('rp2',this)" tabindex="-1">👁</button>
+            </div>
+          </div>
           <p id="rerr" class="err-msg" style="display:none"></p>
           <p id="rsuc" style="display:none;color:#1D9E75;font-size:13px;text-align:center;margin:8px 0;font-weight:600">
             ✅ 申請已送出！請等待管理員審核後即可登入。

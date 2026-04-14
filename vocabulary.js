@@ -2134,6 +2134,15 @@ let stats={totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new Array(30)
 function S(id){return document.getElementById(id)}
 function showScreen(id){document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));S(id).classList.add("active")}
 
+// ── 密碼顯示切換（眼睛按鈕）────────────────────────────────────
+function togglePw(inputId, btn){
+  const inp = S(inputId);
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
+  btn.classList.toggle('active', show);
+}
+
 // ── 登入 / 登出 / 註冊 ────────────────────────────────────────
 
 // 切換登入/註冊表單 Tab
@@ -2166,12 +2175,22 @@ async function doLogin(){
     }
 
     const hash = await sha256(p);
-    const {data, error} = await sb.rpc('verify_login',{
-      p_username: u,
-      p_hash: hash
-    });
 
-    if(error){showLoginErr('登入失敗：'+error.message);return;}
+    // 用 fetch 直接呼叫（相容新版 publishable key）
+    const resp = await fetch(SUPABASE_URL+'/rest/v1/rpc/verify_login', {
+      method: 'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({p_username:u, p_hash:hash})
+    });
+    if(!resp.ok){
+      const e=await resp.json().catch(()=>({}));
+      showLoginErr('登入失敗：'+(e.message||resp.status));return;
+    }
+    const data = await resp.json();
     if(!data||data.length===0){showLoginErr('帳號或密碼錯誤，請再試一次');return;}
 
     const user=data[0];
@@ -2225,31 +2244,51 @@ async function doRegister(){
 
   try{
     const sb=getSB();
-    if(!sb){showRegErr('無法連線到伺服器，請確認網路');return;}
+    if(!sb){showRegErr('無法連線到伺服器，請確認 Supabase 設定');return;}
 
     const hash = await sha256(pass);
-    const {error} = await sb.from('vocab_users').insert({
-      username,
-      display_name: displayName,
-      password_hash: hash,
-      grade,
-      status: 'pending',
-      is_admin: false
+
+    // 用 fetch 直接呼叫 Supabase REST API（相容新版 publishable key）
+    const resp = await fetch(SUPABASE_URL+'/rest/v1/vocab_users', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer '+SUPABASE_ANON_KEY,
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        username,
+        display_name: displayName,
+        password_hash: hash,
+        grade,
+        status: 'pending',
+        is_admin: false
+      })
     });
 
-    if(error){
-      if(error.code==='23505') showRegErr('此帳號已被使用，請換一個');
-      else showRegErr('註冊失敗：'+error.message);
+    if(resp.status===201||resp.status===200){
+      // 成功
+      S('rsuc').style.display='block';
+      S('ru').value=''; S('rname').value=''; S('rp').value=''; S('rp2').value='';
       return;
     }
 
-    // 成功
-    S('rsuc').style.display='block';
-    S('ru').value=''; S('rname').value=''; S('rp').value=''; S('rp2').value='';
+    // 錯誤處理
+    let errMsg='申請失敗';
+    try{
+      const errJson=await resp.json();
+      if(resp.status===409||errJson.code==='23505'||String(errJson.message).includes('duplicate')){
+        errMsg='此帳號已被使用，請換一個';
+      } else {
+        errMsg='申請失敗（'+resp.status+'）：'+(errJson.message||errJson.details||JSON.stringify(errJson));
+      }
+    }catch(_){errMsg='申請失敗（HTTP '+resp.status+'）';}
+    showRegErr(errMsg);
 
   }catch(e){
-    showRegErr('網路錯誤，請稍後再試');
-    console.error(e);
+    showRegErr('網路錯誤：'+e.message);
+    console.error('doRegister error:',e);
   }finally{
     btn.disabled=false; btn.textContent='送出申請';
   }
