@@ -2814,14 +2814,46 @@ const GRAMMAR=[
   {lv:2,topic:"時態一致",stem:"He said that he ___ very tired.",opts:["is","will be","was","has been"],ans:2,explain:"主句是過去式 said，從句時態退一格，用 was。"},
 ];
 
-let currentUser="",currentUserDisplay="",currentUserId="",currentUserHash="",currentUserGrade="国一",vLevel=0,vIdx=0,vAnswered=[],vScore=0,vRevealed=[],vPool=[],vAutoTimer=null,autoNext=true,vocabTabActive=false;
+let currentUser="",currentUserDisplay="",currentUserId="",currentUserHash="",currentUserGrade="国一",currentSessionToken="",vLevel=0,vIdx=0,vAnswered=[],vScore=0,vRevealed=[],vPool=[],vAutoTimer=null,autoNext=true,vocabTabActive=false;
 let sLevel=0,sIdx=0,sAnswered=[],sScore=0,sPool=[],sHinted=[],sAutoNext=true,sAutoTimer=null;
 let gLevel=0,gIdx=0,gAnswered=[],gScore=0,gPool=[],gAutoNext=true,gAutoTimer=null;
 let mLevel=0,myWords=[],myFilter=-1,todaySeenWords={};
+let dailyLogs={};   // 每日記錄 { "2025-01-01": {cV,tV,cS,tS,cG,tG, games:{mole,flip,wordle,wc}} }
 let chartRange=7;
 let stats={totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new Array(30).fill(0)};
 
 function S(id){return document.getElementById(id)}
+
+// ── 音效 (Web Audio API) ─────────────────────────────────────
+let _audioCtx=null;
+function _getAudioCtx(){
+  if(!_audioCtx){
+    try{_audioCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){return null;}
+  }
+  if(_audioCtx.state==='suspended')_audioCtx.resume();
+  return _audioCtx;
+}
+function playSound(type){
+  const ctx=_getAudioCtx();if(!ctx)return;
+  const osc=ctx.createOscillator();
+  const gain=ctx.createGain();
+  osc.connect(gain);gain.connect(ctx.destination);
+  if(type==='correct'){
+    osc.type='sine';
+    osc.frequency.setValueAtTime(660,ctx.currentTime);
+    osc.frequency.setValueAtTime(880,ctx.currentTime+0.1);
+    gain.gain.setValueAtTime(0.25,ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.45);
+    osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.45);
+  }else{
+    osc.type='sawtooth';
+    osc.frequency.setValueAtTime(300,ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(120,ctx.currentTime+0.3);
+    gain.gain.setValueAtTime(0.2,ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);
+    osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.3);
+  }
+}
 function showScreen(id){document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));S(id).classList.add("active")}
 
 // ── 密碼顯示切換（眼睛按鈕）────────────────────────────────────
@@ -2891,13 +2923,16 @@ async function doLogin(){
       showLoginErr('帳號已被拒絕，請聯絡管理員');return;
     }
 
-    // 登入成功
+    // 登入成功 — 產生此裝置專屬 session token，強制單裝置登入
     S("lerr").style.display="none";
-    currentUser        = u;
-    currentUserDisplay = user.display_name;
-    currentUserId      = user.id;
-    currentUserHash    = hash;   // 儲存 hash 供後續 DB 操作
-    currentUserGrade   = user.grade;
+    currentUser          = u;
+    currentUserDisplay   = user.display_name;
+    currentUserId        = user.id;
+    currentUserHash      = hash;
+    currentUserGrade     = user.grade;
+    currentSessionToken  = (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);
+    // 寫入 session token 到後端（非阻塞）
+    _updateSessionToken(currentSessionToken);
     initMain();
 
   }catch(e){
@@ -2995,22 +3030,68 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(lp) lp.addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
 });
 
-function doLogout(){
+function doLogout(msg){
   // 登出前強制同步一次
   if(currentUser && currentUserHash) _dbSaveNow();
-  currentUser=''; currentUserDisplay=''; currentUserId=''; currentUserHash=''; currentUserGrade='';
+  currentUser=''; currentUserDisplay=''; currentUserId=''; currentUserHash=''; currentUserGrade=''; currentSessionToken='';
   if(_dbSaveTimer) clearTimeout(_dbSaveTimer);
   showScreen("loginScreen");
   S("lu").value=""; S("lp").value="";
   switchLoginTab('login');
+  if(msg){const el=S('lerr');el.textContent=msg;el.style.display='block';}
 }
 
 // ── 資料庫進度同步 ────────────────────────────────────────────
 let _dbSaveTimer = null;
 
+// 更新 session token 到後端（用於單裝置登入）
+async function _updateSessionToken(token){
+  if(!currentUser||!currentUserHash||!token) return;
+  try{
+    await fetch(SUPABASE_URL+'/rest/v1/rpc/update_session_token',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({p_username:currentUser, p_hash:currentUserHash, p_token:token})
+    });
+  }catch(e){
+    console.warn('_updateSessionToken error:',e);
+  }
+}
+
+// 檢查 session token 是否仍有效（被其他裝置頂掉則強制登出）
+async function _checkSession(){
+  if(!currentUser||!currentUserHash||!currentSessionToken) return;
+  try{
+    const resp=await fetch(SUPABASE_URL+'/rest/v1/rpc/check_session_token',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({p_username:currentUser, p_hash:currentUserHash, p_token:currentSessionToken})
+    });
+    if(!resp.ok) return;
+    const result=await resp.json();
+    // 若後端回傳 false，代表 token 已被其他裝置覆蓋
+    if(result===false||result[0]===false){
+      doLogout('⚠️ 您的帳號已在其他裝置登入，此裝置已自動登出');
+    }
+  }catch(e){
+    console.warn('_checkSession error:',e);
+  }
+}
+
 // 從資料庫載入進度，合併到目前狀態（登入後呼叫）
 async function syncFromDB(){
   if(!currentUser || !currentUserHash) return;
+  // 先驗證 session
+  await _checkSession();
+  if(!currentUser) return; // 被踢出
   try{
     const resp = await fetch(SUPABASE_URL+'/rest/v1/rpc/get_progress',{
       method:'POST',
@@ -3041,6 +3122,7 @@ async function syncFromDB(){
                         cV_today:0,cS_today:0,cG_today:0,gramErrors:{},cefrLevel:'',
                         gradeSetting:'',placementResult:null}, dbData.stats||{});
       todaySeenWords = dbData.today_seen|| {};
+      dailyLogs      = dbData.daily_logs|| {};
       // 確保 week 陣列足夠長
       if(!stats.week||stats.week.length<30) stats.week=new Array(30).fill(0);
       saveData(); // 更新本機 cache
@@ -3074,7 +3156,8 @@ async function _dbSaveNow(){
         p_hash:       currentUserHash,
         p_my_words:   myWords,
         p_stats:      stats,
-        p_today_seen: todaySeenWords
+        p_today_seen: todaySeenWords,
+        p_daily_logs: dailyLogs
       })
     });
   }catch(e){
@@ -3122,6 +3205,7 @@ function loadData(){
     const d=JSON.parse(localStorage.getItem("engapp4_"+currentUser)||"{}");
     myWords=d.myWords||[];
     todaySeenWords=d.todaySeenWords||{};
+    dailyLogs=d.dailyLogs||{};
     const savedStats=d.stats||{};if(!savedStats.week||savedStats.week.length<30){savedStats.week=new Array(30).fill(0);}
 stats=Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new Array(30).fill(0),tV_today:0,tS_today:0,tG_today:0,cV_today:0,cS_today:0,cG_today:0,gramErrors:{},cefrLevel:"",gradeSetting:"",placementResult:null},savedStats);
     const today=new Date().toDateString();
@@ -3133,12 +3217,38 @@ stats=Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new
       missionFireSent=false;chartRange=7;
       saveData(today);
     }
-  }catch(e){myWords=[];todaySeenWords={};stats={totalDays:1,streak:1,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:[0,0,0,0,0,0,0]}}
+  }catch(e){myWords=[];todaySeenWords={};dailyLogs={};stats={totalDays:1,streak:1,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:[0,0,0,0,0,0,0]}}
 }
 function saveData(today){
-  const payload={myWords,stats,todaySeenWords,lastDay:today||new Date().toDateString(),dbSavedAt:Date.now()};
+  _updateDailyLog(); // 同步最新練習數據到 dailyLogs
+  const payload={myWords,stats,todaySeenWords,dailyLogs,lastDay:today||new Date().toDateString(),dbSavedAt:Date.now()};
   localStorage.setItem("engapp4_"+currentUser,JSON.stringify(payload));
   // 排程寫入資料庫（3秒防抖）
+  _scheduleDBSave();
+}
+
+// 更新今日的 dailyLogs 記錄
+function _updateDailyLog(){
+  const today=new Date().toISOString().slice(0,10); // YYYY-MM-DD
+  if(!dailyLogs[today])dailyLogs[today]={date:today,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,games:{}};
+  const log=dailyLogs[today];
+  log.cV=stats.cV_today||0; log.tV=stats.tV_today||0;
+  log.cS=stats.cS_today||0; log.tS=stats.tS_today||0;
+  log.cG=stats.cG_today||0; log.tG=stats.tG_today||0;
+}
+
+// 記錄遊戲分數到 dailyLogs（不呼叫 saveData，避免循環呼叫；由 saveScore 統一處理 localStorage）
+function _logGameScore(gameType, score){
+  const today=new Date().toISOString().slice(0,10);
+  if(!dailyLogs[today])dailyLogs[today]={date:today,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,games:{}};
+  if(!dailyLogs[today].games)dailyLogs[today].games={};
+  const prev=dailyLogs[today].games[gameType]||{count:0,best:0,scores:[]};
+  prev.count++;
+  prev.best=Math.max(prev.best||0,score);
+  if(!prev.scores)prev.scores=[];
+  prev.scores.push(score);
+  dailyLogs[today].games[gameType]=prev;
+  // 直接排程 DB 同步（不走 saveData 以免重複計算）
   _scheduleDBSave();
 }
 
@@ -3301,14 +3411,16 @@ function checkV(chosen,opts,correct){
     if(opts[i]===correct)b.classList.add("correct");else if(i===chosen&&opts[i]!==correct)b.classList.add("wrong");
   });
   if(ok){
+    playSound('correct');
     const last=vIdx===vPool.length-1;
     if(autoNext){
-      S("vFeedback").textContent="✓ 答對了！2秒後自動切換…";S("vFeedback").className="feedback fok";
-      vAutoTimer=setTimeout(()=>{vAutoTimer=null;if(last)finishVocab();else vGo(1);},2000);
+      S("vFeedback").textContent="✓ 答對了！1秒後自動切換…";S("vFeedback").className="feedback fok";
+      vAutoTimer=setTimeout(()=>{vAutoTimer=null;if(last)finishVocab();else vGo(1);},1000);
     } else {
       S("vFeedback").textContent="✓ 答對了！太棒了！";S("vFeedback").className="feedback fok";
     }
   } else {
+    playSound('wrong');
     S("vFeedback").textContent="✗ 答錯了，繼續加油！";S("vFeedback").className="feedback fno";
   }
 }
@@ -3415,6 +3527,7 @@ function checkSpell(){
   stats.tS_today=(stats.tS_today||0)+1;
   if(ok)stats.cS_today=(stats.cS_today||0)+1;
   saveData();renderStats();
+  if(ok)playSound('correct');else playSound('wrong');
   S("spellInput").className="spell-input "+(ok?"ok":"bad");S("spellInput").disabled=true;renderLetterBoxes(typed,ok?"ok":"bad");
   S("sFeedback").textContent=ok?"✓ 拼對了！太棒了！":"✗ 拼錯了，正確拼法：";S("sFeedback").className="feedback "+(ok?"fok":"fno");
   if(!ok){S("spellAnswerReveal").style.display="block";S("spellAnswerReveal").innerHTML=`<div class="spell-answer-reveal">${v.w}</div>`}
@@ -3422,8 +3535,8 @@ function checkSpell(){
   S("confirmSpellBtn").style.display="none";
   if(ok&&sAutoNext){
     const last=sIdx===sPool.length-1;
-    S("sFeedback").textContent="✓ 拼對了！2秒後自動切換…";
-    sAutoTimer=setTimeout(()=>{sAutoTimer=null;if(last)finishSpell();else sGo(1);},2000);
+    S("sFeedback").textContent="✓ 拼對了！1秒後自動切換…";
+    sAutoTimer=setTimeout(()=>{sAutoTimer=null;if(last)finishSpell();else sGo(1);},1000);
   }
 }
 function giveHint(){
@@ -3644,13 +3757,14 @@ function checkG(chosen,q){
   if(ok){gScore++;stats.cG++;stats.cG_today=(stats.cG_today||0)+1;}
   else{if(!stats.gramErrors)stats.gramErrors={};stats.gramErrors[q.topic]=(stats.gramErrors[q.topic]||0)+1;}
   stats.tG++;stats.tG_today=(stats.tG_today||0)+1;saveData();renderStats();
+  if(ok)playSound('correct');else playSound('wrong');
   document.querySelectorAll("#gOpts .opt-btn").forEach((b,i)=>{b.disabled=true;if(i===q.ans)b.classList.add("correct");else if(i===chosen&&i!==q.ans)b.classList.add("wrong")});
   S("gFeedback").textContent=ok?"✓ 答對了！":"✗ 答錯了，正確答案是："+q.opts[q.ans];S("gFeedback").className="feedback "+(ok?"fok":"fno");
   S("gExplain").style.display="block";S("gExplain").textContent="📝 "+q.explain;
   if(ok&&gAutoNext){
     const last=gIdx===gPool.length-1;
-    S("gFeedback").textContent="✓ 答對了！2秒後自動切換…";
-    gAutoTimer=setTimeout(()=>{gAutoTimer=null;if(last)finishGrammar();else gGo(1);},2000);
+    S("gFeedback").textContent="✓ 答對了！1秒後自動切換…";
+    gAutoTimer=setTimeout(()=>{gAutoTimer=null;if(last)finishGrammar();else gGo(1);},1000);
   }
 }
 function gGo(dir){if(gAutoTimer){clearTimeout(gAutoTimer);gAutoTimer=null;}gIdx=Math.max(0,Math.min(gPool.length-1,gIdx+dir));renderGrammar()}
@@ -3953,6 +4067,7 @@ function whack(btn,isCorrect,target,options){
   gAnswered_game=true;
   document.querySelectorAll(".mole-btn").forEach(b=>{b.disabled=true;});
   if(isCorrect){
+    playSound('correct');
     btn.classList.add("hit-ok");
     gCorrect++;gCombo_v++;gMaxCombo=Math.max(gMaxCombo,gCombo_v);
     const bonus=gCombo_v>=5?3:gCombo_v>=3?2:1;
@@ -3965,6 +4080,7 @@ function whack(btn,isCorrect,target,options){
     fb.textContent=gCombo_v>=5?"🔥🔥🔥 超神連擊 +"+10*bonus:gCombo_v>=3?"🔥 連擊 +"+10*bonus:"✓ 答對 +10";
     setTimeout(()=>{if(!gAnswered_game||gTimerInterval)nextMole();},600);
   } else {
+    playSound('wrong');
     btn.classList.add("hit-bad");
     // highlight correct
     document.querySelectorAll(".mole-btn").forEach(b=>{if(b.textContent===target.w)b.classList.add("hit-ok");});
@@ -4023,6 +4139,8 @@ function saveScore(gameKey, score, extra){
   const hist=JSON.parse(localStorage.getItem(k)||"[]");
   hist.unshift({score, extra, date:new Date().toLocaleDateString("zh-TW")});
   localStorage.setItem(k, JSON.stringify(hist.slice(0,20)));
+  // 同步記錄到 dailyLogs
+  _logGameScore(gameKey, score);
 }
 function getHistory(gameKey){
   return JSON.parse(localStorage.getItem("gHistory_"+currentUser+"_"+gameKey)||"[]");
@@ -4143,6 +4261,7 @@ function flipCard(card,idx){
   if(fFirst.idx===idx)return;
   fSecond={card,idx};fLocked=true;
   if(fCards[fFirst.idx].pairId===fCards[idx].pairId){
+    playSound('correct');
     fFirst.card.style.background="#EAF3DE";fFirst.card.style.color="#27500A";fFirst.card.style.borderColor="#639922";
     card.style.background="#EAF3DE";card.style.color="#27500A";card.style.borderColor="#639922";
     fCards[fFirst.idx].matched=true;fCards[idx].matched=true;
@@ -4150,6 +4269,7 @@ function flipCard(card,idx){
     fFirst=null;fSecond=null;fLocked=false;
     if(fMatched_v>=fPairs)setTimeout(finishFlip,300);
   } else {
+    playSound('wrong');
     setTimeout(()=>{
       fFirst.card.style.background="#534AB7";fFirst.card.style.color="#534AB7";fFirst.card.textContent="";fFirst.card.style.borderColor="#AFA9EC";
       fSecond.card.style.background="#534AB7";fSecond.card.style.color="#534AB7";fSecond.card.textContent="";fSecond.card.style.borderColor="#AFA9EC";
@@ -4276,6 +4396,7 @@ function updateWordleKbd(guess,result){
   });
 }
 function showWordleOver(won){
+  if(won)playSound('correct');else playSound('wrong');
   const wp=S("wordle-play"),wo=S("wordle-over");
   if(wp)wp.style.display="none";if(wo)wo.style.display="block";
   if(S("woEmoji"))S("woEmoji").textContent=won?"🎉":"😢";
@@ -4678,6 +4799,7 @@ function wcCheckComplete(){
     }
     if(correct)done++;
   });
+  if(done>wcCompleted)playSound('correct');
   wcCompleted=done;
   if(S("wcProgress"))S("wcProgress").textContent="完成 "+done+" / "+wcWords.length+" 個單字";
   if(done===wcWords.length){
@@ -5130,16 +5252,18 @@ function answerPT(chosen){
     else if(i===chosen&&!ok)b.classList.add("wrong");
   });
   if(ok){
+    playSound('correct');
     ptScore.total++;
     if(q.cat.includes("詞彙"))ptScore.vocab++;
     else if(q.cat.includes("文法"))ptScore.gram++;
     else if(q.cat.includes("閱讀"))ptScore.read++;
     S("ptFeedback").textContent="✓ 答對了！";S("ptFeedback").style.color="#27500A";
   } else {
+    playSound('wrong');
     S("ptFeedback").textContent="✗ 答錯了";S("ptFeedback").style.color="#A32D2D";
   }
   ptAnswers.push({q,chosen,ok});
-  ptAutoTimer=setTimeout(()=>{ptIdx++;renderPTQuestion();},1200);
+  ptAutoTimer=setTimeout(()=>{ptIdx++;renderPTQuestion();},1000);
 }
 function showPlacementResult(){
   S("pm-test").style.display="none";
