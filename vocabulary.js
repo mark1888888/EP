@@ -2815,6 +2815,8 @@ const GRAMMAR=[
 ];
 
 let currentUser="",currentUserDisplay="",currentUserId="",currentUserHash="",currentUserGrade="国一",currentSessionToken="",vLevel=0,vIdx=0,vAnswered=[],vScore=0,vRevealed=[],vPool=[],vAutoTimer=null,autoNext=true,vocabTabActive=false;
+let dismissedWrongWords=[]; // 用戶手動從錯誤列表中移除的單字
+let statsRangeMode='today';  // 數據顯示範圍：'today' | 'week' | 'month'
 let sLevel=0,sIdx=0,sAnswered=[],sScore=0,sPool=[],sHinted=[],sAutoNext=true,sAutoTimer=null;
 let gLevel=0,gIdx=0,gAnswered=[],gScore=0,gPool=[],gAutoNext=true,gAutoTimer=null;
 let mLevel=0,myWords=[],myFilter=-1,todaySeenWords={};
@@ -2879,6 +2881,55 @@ function switchLoginTab(tab){
   S('rsuc').style.display='none';
 }
 
+// ── 登入衝突彈窗：詢問是否要踢掉舊裝置 ──────────────────────
+function _showLoginConflictModal(onConfirm, onCancel){
+  const ov=document.createElement('div');
+  ov.id='_loginConflictOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px';
+  ov.innerHTML=`<div style="background:#fff;border-radius:20px;padding:28px 24px;max-width:360px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.3)">
+    <div style="font-size:38px;margin-bottom:12px">⚠️</div>
+    <div style="font-size:17px;font-weight:700;color:#2C2C2A;margin-bottom:8px">已在其他裝置登入</div>
+    <div style="font-size:14px;color:#5F5E5A;margin-bottom:24px;line-height:1.6">此帳號目前在其他裝置上登入中。<br>是否重新登入？<br><span style="font-size:12px;color:#A32D2D">（舊裝置將自動登出）</span></div>
+    <div style="display:flex;gap:10px">
+      <button id="_lcCancel" style="flex:1;padding:12px;background:#E8E6E0;color:#2C2C2A;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">取消</button>
+      <button id="_lcOk" style="flex:1;padding:12px;background:#534AB7;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">重新登入</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#_lcOk').onclick=()=>{ov.remove();onConfirm();};
+  ov.querySelector('#_lcCancel').onclick=()=>{ov.remove();onCancel();};
+}
+
+// ── 被踢出彈窗：通知此裝置已被登出 ─────────────────────────
+function _showKickedOutModal(){
+  const existing=S('_kickedOv');if(existing)existing.remove();
+  const ov=document.createElement('div');
+  ov.id='_kickedOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px';
+  ov.innerHTML=`<div style="background:#fff;border-radius:20px;padding:28px 24px;max-width:360px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.3)">
+    <div style="font-size:38px;margin-bottom:12px">🔔</div>
+    <div style="font-size:17px;font-weight:700;color:#2C2C2A;margin-bottom:8px">已在其他裝置登入</div>
+    <div style="font-size:14px;color:#5F5E5A;margin-bottom:24px;line-height:1.6">您的帳號已在其他裝置登入，<br>此裝置已自動登出。</div>
+    <button onclick="document.getElementById('_kickedOv').remove()" style="width:100%;padding:12px;background:#534AB7;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">確認</button>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+// ── 檢查後端是否有其他裝置的 session ────────────────────────
+// 用不可能匹配的假 token 來探測：若回傳 false → DB 有 token → 其他裝置在線
+async function _checkHasActiveSession(username, hash){
+  try{
+    const resp=await fetch(SUPABASE_URL+'/rest/v1/rpc/check_session_token',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY},
+      body:JSON.stringify({p_username:username,p_hash:hash,p_token:'__NO_SESSION_CHECK__'})
+    });
+    if(!resp.ok)return false;
+    const r=await resp.json();
+    return r===false||(Array.isArray(r)&&r[0]===false);
+  }catch(e){return false;}
+}
+
 // ── 登入 ─────────────────────────────────────────────────────
 async function doLogin(){
   const u=S("lu").value.trim(), p=S("lp").value.trim();
@@ -2923,17 +2974,30 @@ async function doLogin(){
       showLoginErr('帳號已被拒絕，請聯絡管理員');return;
     }
 
-    // 登入成功 — 產生此裝置專屬 session token，強制單裝置登入
-    S("lerr").style.display="none";
-    currentUser          = u;
-    currentUserDisplay   = user.display_name;
-    currentUserId        = user.id;
-    currentUserHash      = hash;
-    currentUserGrade     = user.grade;
-    currentSessionToken  = (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);
-    // 寫入 session token 到後端（非阻塞）
-    _updateSessionToken(currentSessionToken);
-    initMain();
+    // 驗證通過 — 檢查是否有其他裝置正在線上
+    const anotherActive = await _checkHasActiveSession(u, hash);
+
+    const _doActualLogin = () => {
+      S("lerr").style.display="none";
+      currentUser         = u;
+      currentUserDisplay  = user.display_name;
+      currentUserId       = user.id;
+      currentUserHash     = hash;
+      currentUserGrade    = user.grade;
+      currentSessionToken = (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);
+      _updateSessionToken(currentSessionToken);
+      initMain();
+    };
+
+    if(anotherActive){
+      // 有其他裝置在線，先詢問使用者
+      _showLoginConflictModal(
+        ()=>{ _doActualLogin(); },          // 確定：踢掉舊裝置並登入
+        ()=>{ /* 取消：什麼都不做 */ }
+      );
+    } else {
+      _doActualLogin();
+    }
 
   }catch(e){
     showLoginErr('網路錯誤，請稍後再試');
@@ -3078,8 +3142,15 @@ async function _checkSession(){
     if(!resp.ok) return;
     const result=await resp.json();
     // 若後端回傳 false，代表 token 已被其他裝置覆蓋
-    if(result===false||result[0]===false){
-      doLogout('⚠️ 您的帳號已在其他裝置登入，此裝置已自動登出');
+    if(result===false||(Array.isArray(result)&&result[0]===false)){
+      // 先儲存再登出
+      await _dbSaveNow();
+      currentUser='';currentUserDisplay='';currentUserId='';currentUserHash='';currentUserGrade='';currentSessionToken='';
+      if(_dbSaveTimer)clearTimeout(_dbSaveTimer);
+      showScreen("loginScreen");
+      S("lu").value="";S("lp").value="";
+      switchLoginTab('login');
+      _showKickedOutModal();
     }
   }catch(e){
     console.warn('_checkSession error:',e);
@@ -3117,10 +3188,10 @@ async function syncFromDB(){
     if(dbTs > localTs){
       // 資料庫比本機新 → 用資料庫的覆蓋本機
       myWords        = dbData.my_words  || [];
-      stats          = Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,
+      stats          = Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,tR:0,cR:0,
                         week:new Array(30).fill(0),tV_today:0,tS_today:0,tG_today:0,
-                        cV_today:0,cS_today:0,cG_today:0,gramErrors:{},cefrLevel:'',
-                        gradeSetting:'',placementResult:null}, dbData.stats||{});
+                        cV_today:0,cS_today:0,cG_today:0,tR_today:0,cR_today:0,
+                        gramErrors:{},cefrLevel:'',gradeSetting:'',placementResult:null}, dbData.stats||{});
       todaySeenWords = dbData.today_seen|| {};
       dailyLogs      = dbData.daily_logs|| {};
       // 確保 week 陣列足夠長
@@ -3206,8 +3277,9 @@ function loadData(){
     myWords=d.myWords||[];
     todaySeenWords=d.todaySeenWords||{};
     dailyLogs=d.dailyLogs||{};
+    dismissedWrongWords=d.dismissedWrongWords||[];
     const savedStats=d.stats||{};if(!savedStats.week||savedStats.week.length<30){savedStats.week=new Array(30).fill(0);}
-stats=Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new Array(30).fill(0),tV_today:0,tS_today:0,tG_today:0,cV_today:0,cS_today:0,cG_today:0,gramErrors:{},cefrLevel:"",gradeSetting:"",placementResult:null},savedStats);
+stats=Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,tR:0,cR:0,week:new Array(30).fill(0),tV_today:0,tS_today:0,tG_today:0,cV_today:0,cS_today:0,cG_today:0,tR_today:0,cR_today:0,gramErrors:{},cefrLevel:"",gradeSetting:"",placementResult:null},savedStats);
     const today=new Date().toDateString();
     if(d.lastDay!==today){
       stats.streak=(d.lastDay===new Date(Date.now()-86400000).toDateString())?stats.streak+1:1;
@@ -3217,11 +3289,11 @@ stats=Object.assign({totalDays:0,streak:0,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:new
       missionFireSent=false;chartRange=7;
       saveData(today);
     }
-  }catch(e){myWords=[];todaySeenWords={};dailyLogs={};stats={totalDays:1,streak:1,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,week:[0,0,0,0,0,0,0]}}
+  }catch(e){myWords=[];todaySeenWords={};dailyLogs={};dismissedWrongWords=[];stats={totalDays:1,streak:1,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,tR:0,cR:0,week:[0,0,0,0,0,0,0]}}
 }
 function saveData(today){
   _updateDailyLog(); // 同步最新練習數據到 dailyLogs
-  const payload={myWords,stats,todaySeenWords,dailyLogs,lastDay:today||new Date().toDateString(),dbSavedAt:Date.now()};
+  const payload={myWords,stats,todaySeenWords,dailyLogs,dismissedWrongWords,lastDay:today||new Date().toDateString(),dbSavedAt:Date.now()};
   localStorage.setItem("engapp4_"+currentUser,JSON.stringify(payload));
   // 排程寫入資料庫（3秒防抖）
   _scheduleDBSave();
@@ -3235,6 +3307,7 @@ function _updateDailyLog(){
   log.cV=stats.cV_today||0; log.tV=stats.tV_today||0;
   log.cS=stats.cS_today||0; log.tS=stats.tS_today||0;
   log.cG=stats.cG_today||0; log.tG=stats.tG_today||0;
+  log.cR=stats.cR_today||0; log.tR=stats.tR_today||0;
 }
 
 // 記錄遊戲分數到 dailyLogs（不呼叫 saveData，避免循環呼叫；由 saveScore 統一處理 localStorage）
@@ -3791,16 +3864,74 @@ function renderMyWords(){
 }
 function removeWord(idx){if(confirm("確定刪除「"+myWords[idx].w+"」嗎？")){myWords.splice(idx,1);saveData();renderMyWords();renderStats()}}
 
+// ── 數據範圍切換 ─────────────────────────────────────────────
+function switchStatsRange(mode, btn){
+  statsRangeMode=mode;
+  document.querySelectorAll('.stats-range-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  renderStats();
+}
+
+function getStatsForRange(range){
+  if(range==='today'){
+    return {
+      cV:stats.cV_today||0, tV:stats.tV_today||0,
+      cS:stats.cS_today||0, tS:stats.tS_today||0,
+      cG:stats.cG_today||0, tG:stats.tG_today||0,
+      cR:stats.cR_today||0, tR:stats.tR_today||0
+    };
+  }
+  const days=range==='week'?7:30;
+  const result={cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,cR:0,tR:0};
+  const now=new Date();
+  for(let i=0;i<days;i++){
+    const d=new Date(now);d.setDate(d.getDate()-i);
+    const key=d.toISOString().slice(0,10);
+    const log=dailyLogs[key];
+    if(!log)continue;
+    result.cV+=log.cV||0;result.tV+=log.tV||0;
+    result.cS+=log.cS||0;result.tS+=log.tS||0;
+    result.cG+=log.cG||0;result.tG+=log.tG||0;
+    result.cR+=log.cR||0;result.tR+=log.tR||0;
+  }
+  return result;
+}
+
+function renderGameHighScores(){
+  const card=S('gameHighScoreCard');if(!card)return;
+  const games=[
+    {key:'mole',label:'🦔 打地鼠',unit:'分',higher:true},
+    {key:'flip',label:'🃏 翻牌記憶',unit:'秒',higher:false},
+    {key:'wordle',label:'🟩 Wordle',unit:'次猜中',higher:false},
+    {key:'wordcross',label:'✏️ 填字遊戲',unit:'分',higher:true}
+  ];
+  let html='';
+  games.forEach(g=>{
+    const hist=getHistory(g.key);if(!hist.length)return;
+    const best=g.higher?Math.max(...hist.map(r=>r.score)):Math.min(...hist.map(r=>r.score));
+    html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid #E8E6E0">
+      <span style="font-size:13px;color:#2C2C2A">${g.label}</span>
+      <span style="font-size:14px;font-weight:700;color:#534AB7">${best} ${g.unit}</span>
+    </div>`;
+  });
+  if(!html){card.style.display='none';return;}
+  card.style.display='block';
+  const list=S('gameHighScoreList');if(list)list.innerHTML=html;
+}
+
 function renderStats(){
   S("stD").textContent=stats.totalDays;S("stS").textContent=stats.streak;
-  const tot=stats.tV+stats.tS+stats.tG;
-  S("stA").textContent=tot?Math.round((stats.cV+stats.cS+stats.cG)/tot*100)+"%":"—";
-  S("stV").textContent=stats.tV;S("stSp").textContent=stats.tS;S("stG").textContent=stats.tG;
+  const rd=getStatsForRange(statsRangeMode);
+  const tot=rd.tV+rd.tS+rd.tG+rd.tR;
+  S("stA").textContent=tot?Math.round((rd.cV+rd.cS+rd.cG+rd.cR)/tot*100)+"%":"—";
+  S("stV").textContent=rd.tV;S("stSp").textContent=rd.tS;S("stG").textContent=rd.tG;
+  const stR=S("stR");if(stR)stR.textContent=rd.tR;
   renderChart();
   renderMissions();
   renderPracticedWords('all');
   renderGramErrorCard();
   renderCEFR();
+  renderGameHighScores();
 }
 
 let practicedFilter='all';
@@ -3833,18 +3964,32 @@ function renderPracticedWords(filter){
 function getAllWrongWords(){
   const allWords=[...BUILTIN,...myWords];
   const wrongSet={};
+  const correctSet=new Set(); // 曾經答對過的單字
+  const dimSet=new Set(dismissedWrongWords||[]);
   Object.values(todaySeenWords).forEach(dayMap=>{
     Object.entries(dayMap).forEach(([w,entry])=>{
-      // 相容新格式 {status,src} 與舊格式 "wrong"
       const status=typeof entry==="object"?entry.status:entry;
       const src=typeof entry==="object"?entry.src:"vocab";
+      if(status==="ok") correctSet.add(w);
       if(status==="wrong"&&!wrongSet[w]){
         const word=allWords.find(v=>v.w===w)||{w,zh:"",pos:""};
         wrongSet[w]={...word,wrongSrc:src};
       }
     });
   });
-  return Object.values(wrongSet);
+  // 過濾已解除的單字，並標記是否曾答對過（允許刪除）
+  return Object.values(wrongSet)
+    .filter(w=>!dimSet.has(w.w))
+    .map(w=>({...w,hasCorrect:correctSet.has(w.w)}));
+}
+
+function dismissWrongWord(wordStr){
+  if(!dismissedWrongWords.includes(wordStr)) dismissedWrongWords.push(wordStr);
+  saveData();
+  renderReviewWrongCard();
+  // 若複習 Modal 已開啟也同步刷新
+  const ov=S('wrongReviewOverlay');
+  if(ov&&ov.style.display!=='none') openWrongReview();
 }
 
 function renderReviewWrongCard(){
@@ -3857,7 +4002,8 @@ function renderReviewWrongCard(){
   wrongs.forEach(entry=>{
     const row=document.createElement("div");
     row.style.cssText="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #D3D1C7;";
-    row.innerHTML=`<span style="font-size:14px;font-weight:600;color:#2C2C2A;flex:1">${entry.w}</span><span style="font-size:13px;color:#888780">${entry.zh}</span>`;
+    const delBtn=entry.hasCorrect?`<button onclick="dismissWrongWord('${entry.w}')" title="從錯誤列表移除" style="font-size:11px;padding:2px 8px;background:#EAF3DE;color:#27500A;border:1px solid #639922;border-radius:6px;cursor:pointer;white-space:nowrap">✓ 刪除</button>`:'';
+    row.innerHTML=`<span style="font-size:14px;font-weight:600;color:#2C2C2A;flex:1">${entry.w}</span><span style="font-size:13px;color:#888780;margin-right:4px">${entry.zh}</span>${delBtn}`;
     list.appendChild(row);
   });
 }
@@ -4490,10 +4636,9 @@ function startGramErrorReview(){
   gPool=GRAMMAR.filter(q=>q.lv===gLevel&&badTopics.includes(q.topic)).sort(()=>Math.random()-0.5).slice(0,10);
   if(!gPool.length){gPool=GRAMMAR.filter(q=>q.lv===gLevel).sort(()=>Math.random()-0.5).slice(0,10);}
   gIdx=0;gAnswered=new Array(gPool.length).fill(null);gScore=0;
-  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-  document.querySelector('.tab[onclick*="grammar"]').classList.add("active");
-  document.querySelectorAll(".tab-content").forEach(t=>t.style.display="none");
-  switchTab("practice",document.querySelector('.tab[onclick*="practice"]')); switchPTab("grammar",S("ptab-btn-grammar"));
+  // 切換到練習>文法頁面（修正：沒有 onclick*="grammar" 的 .tab，應用 practice tab）
+  switchTab("practice",document.querySelector('.tab[onclick*="practice"]'));
+  switchPTab("grammar",S("ptab-btn-grammar"));
   renderGrammar();
 }
 
@@ -5157,6 +5302,12 @@ function submitReading(){
     });
   });
   const pct=Math.round(score/readPassage.questions.length*100);
+  // 記錄閱讀測驗統計
+  stats.tR=(stats.tR||0)+1;
+  stats.cR=(stats.cR||0)+score;
+  stats.tR_today=(stats.tR_today||0)+1;
+  stats.cR_today=(stats.cR_today||0)+score;
+  saveData();renderStats();
   const result=S("readingResult");result.style.display="block";
   result.innerHTML=`<div class="card" style="text-align:center;padding:1.5rem">
     <div style="font-size:36px;margin-bottom:6px">${pct>=80?"🎉":pct>=60?"😊":"💪"}</div>
@@ -5364,8 +5515,21 @@ function openWrongReview(){
         ✏️ 拼字練習錯誤 <span style="float:right;background:#2E4057;color:#fff;border-radius:20px;padding:2px 10px">${spellWrong.length} 個</span></button>`;
     S('wrSourceBtns').innerHTML = btns;
     S('wrSubtitle').textContent = `共 ${wrongs.length} 個錯誤單字`;
+    // 在首頁顯示單字列表（含刪除按鈕）
+    const wrList = S('wrHomeList');
+    if(wrList){
+      wrList.innerHTML='';
+      wrongs.slice(0,20).forEach(entry=>{
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid #E8E6E0;font-size:13px';
+        const delBtn=entry.hasCorrect?`<button onclick="dismissWrongWord('${entry.w}')" style="flex-shrink:0;font-size:11px;padding:1px 7px;background:#EAF3DE;color:#27500A;border:1px solid #639922;border-radius:5px;cursor:pointer">✓ 刪除</button>`:'';
+        row.innerHTML=`<span style="font-weight:600;color:#2C2C2A;flex:1">${entry.w}</span><span style="color:#888780;margin-right:4px">${entry.zh}</span>${delBtn}`;
+        wrList.appendChild(row);
+      });
+    }
   }
-  wrModal.style.display='block';
+  // 垂直置中（用 flex 替代 block）
+  wrModal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
   document.body.style.overflow='hidden';
 }
 
@@ -5436,12 +5600,18 @@ function checkWrVocab(btn, correct, wordStr){
   document.querySelectorAll('#wrVocabChoices button').forEach(b=>b.onclick=null);
   const ok = btn.textContent.trim()===correct;
   if(ok){
+    playSound('correct');
     btn.style.background='#C6EFCE'; btn.style.borderColor='#4CAF50';
     wrScore++;
+    // 標記此單字已被答對，允許刪除
+    const today=new Date().toDateString();
+    if(!todaySeenWords[today])todaySeenWords[today]={};
+    if(!todaySeenWords[today][wordStr]||todaySeenWords[today][wordStr]==="wrong")
+      todaySeenWords[today][wordStr]={status:"ok",src:"vocab"};
     showWrFeedback(true, wordStr, correct);
   } else {
+    playSound('wrong');
     btn.style.background='#FFC7CE'; btn.style.borderColor='#E53935';
-    // 標綠正確
     document.querySelectorAll('#wrVocabChoices button').forEach(b=>{
       if(b.textContent.trim()===correct){ b.style.background='#C6EFCE'; b.style.borderColor='#4CAF50'; }
     });
@@ -5474,8 +5644,17 @@ function checkWrSpell(){
   if(!input) return;
   S('wrSpellInput').disabled=true;
   const ok = input === w.w.toLowerCase();
-  if(ok){ wrScore++; S('wrSpellInput').style.background='#C6EFCE'; }
-  else { S('wrSpellInput').style.background='#FFC7CE'; wrThisRoundWrong.push(w.w); }
+  if(ok){
+    playSound('correct');
+    wrScore++; S('wrSpellInput').style.background='#C6EFCE';
+    // 標記此單字已被答對
+    const today=new Date().toDateString();
+    if(!todaySeenWords[today])todaySeenWords[today]={};
+    todaySeenWords[today][w.w]={status:"ok",src:"spell"};
+  } else {
+    playSound('wrong');
+    S('wrSpellInput').style.background='#FFC7CE'; wrThisRoundWrong.push(w.w);
+  }
 
   // 顯示答案
   const ex = (w.ex||'').replace(/<b>|<\/b>/g,'');
@@ -5513,6 +5692,10 @@ function showWrRoundEnd(){
   S('wrEndIcon').textContent = pct===100?'🎉': pct>=70?'👍':'💪';
   S('wrEndTitle').textContent = pct===100?'全對！太厲害了！': pct>=70?`答對 ${wrScore}/${total}！繼續加油！`:`答對 ${wrScore}/${total}，再練一次吧`;
   S('wrEndMsg').textContent = `本輪正確率 ${pct}%`;
+  if(pct===100){
+    playSound('correct');
+    startConfetti(S('wrongReviewOverlay')||document.body);
+  }
 
   if(wrThisRoundWrong.length){
     S('wrStillWrong').style.display='block';

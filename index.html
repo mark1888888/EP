@@ -17,8 +17,8 @@
     <div class="login-wrap">
       <div class="login-card">
         <div class="login-icon">📚</div>
-        <div class="login-title">英文單字練習 v8</div>
-        <div class="login-sub">國中生專屬，1857個單字 · 含CEFR分級</div>
+        <div class="login-title">英文詞彙練習Pro</div>
+        <div class="login-sub">1857個單字 · 含CEFR分級</div>
 
         <!-- Tab 切換 -->
         <div style="display:flex;gap:0;border:1.5px solid #AFA9EC;border-radius:10px;overflow:hidden;margin-bottom:18px">
@@ -360,6 +360,12 @@
         </div>
       </div>
 
+      <!-- 數據範圍選擇 -->
+      <div style="display:flex;gap:6px;margin-bottom:12px">
+        <button class="stats-range-btn lbtn active" style="flex:1;font-size:13px;padding:7px" onclick="switchStatsRange('today',this)">本日</button>
+        <button class="stats-range-btn lbtn" style="flex:1;font-size:13px;padding:7px" onclick="switchStatsRange('week',this)">本週</button>
+        <button class="stats-range-btn lbtn" style="flex:1;font-size:13px;padding:7px" onclick="switchStatsRange('month',this)">本月</button>
+      </div>
       <div class="stat-grid">
         <div class="stat-box"><div class="stat-num" id="stD">0</div><div class="stat-lbl">練習天數</div></div>
         <div class="stat-box"><div class="stat-num" id="stS">0</div><div class="stat-lbl">連續天數</div></div>
@@ -369,6 +375,9 @@
         <div class="stat-box"><div class="stat-num" id="stV">0</div><div class="stat-lbl">單字練習</div></div>
         <div class="stat-box"><div class="stat-num" id="stSp">0</div><div class="stat-lbl">拼字練習</div></div>
         <div class="stat-box"><div class="stat-num" id="stG">0</div><div class="stat-lbl">文法練習</div></div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-num" id="stR">0</div><div class="stat-lbl">閱讀測驗</div></div>
       </div>
 
       <div class="card">
@@ -416,6 +425,14 @@
         <div id="gramReviewBtn" style="display:none">
           <button onclick="startGramErrorReview()" style="width:100%;padding:10px;background:#BA7517;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">複習常錯文法類型</button>
         </div>
+      </div>
+
+      <!-- 遊戲最高分 -->
+      <div class="card" id="gameHighScoreCard" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <p style="font-size:15px;font-weight:600;color:#2C2C2A">🎮 遊戲最高分</p>
+        </div>
+        <div id="gameHighScoreList"></div>
       </div>
 
       <!-- CEFR Panel -->
@@ -922,6 +939,8 @@
       <p style="font-size:14px;color:#5F5E5A;margin-bottom:16px">選擇要複習的錯誤類型：</p>
       <div id="wrSourceBtns" style="display:flex;flex-direction:column;gap:10px"></div>
       <button onclick="startWrongSession('all')" id="wrBtnAll" style="margin-top:16px;width:100%;padding:13px;background:#A32D2D;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">全部錯誤一起複習</button>
+      <!-- 錯誤單字列表（含刪除按鈕） -->
+      <div id="wrHomeList" style="max-height:220px;overflow-y:auto;margin-top:12px;padding:0 2px"></div>
       <p id="wrNoError" style="display:none;text-align:center;color:#888;font-size:14px;margin-top:12px">目前沒有錯誤記錄<br><span style="font-size:12px">繼續練習後這裡會顯示錯誤單字</span></p>
     </div>
 
@@ -994,3 +1013,4 @@
 
 </body>
 </html>
+                  
