@@ -3095,8 +3095,18 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 function doLogout(msg){
-  // 登出前強制同步一次
-  if(currentUser && currentUserHash) _dbSaveNow();
+  _stopSessionChecker();
+  // 登出前：儲存資料並清除後端 session token
+  const _u=currentUser, _h=currentUserHash;
+  if(_u && _h){
+    _dbSaveNow();
+    // 清除後端 session token（fire-and-forget）
+    fetch(SUPABASE_URL+'/rest/v1/rpc/update_session_token',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY},
+      body:JSON.stringify({p_username:_u,p_hash:_h,p_token:null})
+    }).catch(()=>{});
+  }
   currentUser=''; currentUserDisplay=''; currentUserId=''; currentUserHash=''; currentUserGrade=''; currentSessionToken='';
   if(_dbSaveTimer) clearTimeout(_dbSaveTimer);
   showScreen("loginScreen");
@@ -3107,6 +3117,17 @@ function doLogout(msg){
 
 // ── 資料庫進度同步 ────────────────────────────────────────────
 let _dbSaveTimer = null;
+let _sessionCheckInterval = null;
+
+// 啟動定期 session 驗證（每 30 秒）
+function _startSessionChecker(){
+  if(_sessionCheckInterval) clearInterval(_sessionCheckInterval);
+  _sessionCheckInterval = setInterval(_checkSession, 30000);
+}
+// 停止定期驗證
+function _stopSessionChecker(){
+  if(_sessionCheckInterval){ clearInterval(_sessionCheckInterval); _sessionCheckInterval=null; }
+}
 
 // 更新 session token 到後端（用於單裝置登入）
 async function _updateSessionToken(token){
@@ -3264,6 +3285,8 @@ function initMain(){
   initVocab();initSpell();initGrammar();renderMyWords();renderStats();
   // 背景從資料庫同步進度（不阻塞 UI）
   syncFromDB();
+  // 啟動定期 session 驗證（防多裝置同時登入）
+  _startSessionChecker();
   // Show last placement result if exists
   if(stats.placementResult){
     const pl=S("ptLastResult"),ps=S("ptLastScore");
@@ -3299,9 +3322,18 @@ function saveData(today){
   _scheduleDBSave();
 }
 
+// 取得本機時區的 YYYY-MM-DD 字串（避免 UTC 日期偏差）
+function _localDateStr(){
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function _dateObjToLocalStr(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
 // 更新今日的 dailyLogs 記錄
 function _updateDailyLog(){
-  const today=new Date().toISOString().slice(0,10); // YYYY-MM-DD
+  const today=_localDateStr(); // YYYY-MM-DD（本機時區）
   if(!dailyLogs[today])dailyLogs[today]={date:today,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,games:{}};
   const log=dailyLogs[today];
   log.cV=stats.cV_today||0; log.tV=stats.tV_today||0;
@@ -3312,7 +3344,7 @@ function _updateDailyLog(){
 
 // 記錄遊戲分數到 dailyLogs（不呼叫 saveData，避免循環呼叫；由 saveScore 統一處理 localStorage）
 function _logGameScore(gameType, score){
-  const today=new Date().toISOString().slice(0,10);
+  const today=_localDateStr();
   if(!dailyLogs[today])dailyLogs[today]={date:today,cV:0,tV:0,cS:0,tS:0,cG:0,tG:0,games:{}};
   if(!dailyLogs[today].games)dailyLogs[today].games={};
   const prev=dailyLogs[today].games[gameType]||{count:0,best:0,scores:[]};
@@ -3886,7 +3918,7 @@ function getStatsForRange(range){
   const now=new Date();
   for(let i=0;i<days;i++){
     const d=new Date(now);d.setDate(d.getDate()-i);
-    const key=d.toISOString().slice(0,10);
+    const key=_dateObjToLocalStr(d);
     const log=dailyLogs[key];
     if(!log)continue;
     result.cV+=log.cV||0;result.tV+=log.tV||0;
@@ -4002,7 +4034,7 @@ function renderReviewWrongCard(){
   wrongs.forEach(entry=>{
     const row=document.createElement("div");
     row.style.cssText="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #D3D1C7;";
-    const delBtn=entry.hasCorrect?`<button onclick="dismissWrongWord('${entry.w}')" title="從錯誤列表移除" style="font-size:11px;padding:2px 8px;background:#EAF3DE;color:#27500A;border:1px solid #639922;border-radius:6px;cursor:pointer;white-space:nowrap">✓ 刪除</button>`:'';
+    const delBtn=`<button onclick="dismissWrongWord('${entry.w}')" title="從錯誤列表移除" style="font-size:11px;padding:2px 8px;background:#EAF3DE;color:#27500A;border:1px solid #639922;border-radius:6px;cursor:pointer;white-space:nowrap">✓ 刪除</button>`;
     row.innerHTML=`<span style="font-size:14px;font-weight:600;color:#2C2C2A;flex:1">${entry.w}</span><span style="font-size:13px;color:#888780;margin-right:4px">${entry.zh}</span>${delBtn}`;
     list.appendChild(row);
   });
@@ -4629,17 +4661,141 @@ function renderGramErrorCard(){
   });
 }
 
+// ═══════════════════════════════════════════════════════════
+// 複習常錯文法 — 獨立 Modal
+// ═══════════════════════════════════════════════════════════
+let gerPool=[], gerIdx=0, gerScore=0, gerAutoTimer=null;
+
 function startGramErrorReview(){
   const errors=stats.gramErrors||{};
+  const topicEntries=Object.entries(errors).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const ov=S('gramErrorReviewOverlay');
+  if(!ov) return;
+
+  // 建立主題列表 HTML
+  const listEl=S('gerTopicList');
+  if(listEl){
+    if(!topicEntries.length){
+      listEl.innerHTML='<p style="font-size:13px;color:#888;text-align:center;padding:12px 0">目前沒有文法錯誤記錄</p>';
+    } else {
+      const max=topicEntries[0][1]||1;
+      listEl.innerHTML=topicEntries.map(([topic,cnt])=>`
+        <div style="padding:7px 0;border-bottom:0.5px solid #E8E6E0">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+            <span style="font-weight:600;color:#2C2C2A">${topic}</span>
+            <span style="color:#BA7517;font-weight:600">${cnt} 次答錯</span>
+          </div>
+          <div style="background:#E8E6E0;border-radius:99px;height:5px">
+            <div style="height:5px;border-radius:99px;width:${Math.round(cnt/max*100)}%;background:#BA7517;transition:width .4s"></div>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+  // 切換到首頁
+  S('gerHome').style.display='block';
+  S('gerSession').style.display='none';
+  S('gerRoundEnd').style.display='none';
+
+  // 顯示 overlay
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;overflow-y:auto;padding:20px';
+  document.body.style.overflow='hidden';
+}
+
+function closeGramErrorReview(){
+  const ov=S('gramErrorReviewOverlay');
+  if(ov)ov.style.display='none';
+  document.body.style.overflow='';
+  if(gerAutoTimer){clearTimeout(gerAutoTimer);gerAutoTimer=null;}
+}
+
+function gerStartSession(){
+  const errors=stats.gramErrors||{};
   const badTopics=Object.entries(errors).sort((a,b)=>b[1]-a[1]).slice(0,5).map(e=>e[0]);
-  if(!badTopics.length)return;
-  gPool=GRAMMAR.filter(q=>q.lv===gLevel&&badTopics.includes(q.topic)).sort(()=>Math.random()-0.5).slice(0,10);
-  if(!gPool.length){gPool=GRAMMAR.filter(q=>q.lv===gLevel).sort(()=>Math.random()-0.5).slice(0,10);}
-  gIdx=0;gAnswered=new Array(gPool.length).fill(null);gScore=0;
-  // 切換到練習>文法頁面（修正：沒有 onclick*="grammar" 的 .tab，應用 practice tab）
-  switchTab("practice",document.querySelector('.tab[onclick*="practice"]'));
-  switchPTab("grammar",S("ptab-btn-grammar"));
-  renderGrammar();
+  let pool;
+  if(badTopics.length){
+    pool=GRAMMAR.filter(q=>badTopics.includes(q.topic)).sort(()=>Math.random()-0.5).slice(0,10);
+  }
+  if(!pool||!pool.length){
+    pool=GRAMMAR.sort(()=>Math.random()-0.5).slice(0,10);
+  }
+  gerPool=pool; gerIdx=0; gerScore=0;
+  if(gerAutoTimer){clearTimeout(gerAutoTimer);gerAutoTimer=null;}
+  S('gerHome').style.display='none';
+  S('gerRoundEnd').style.display='none';
+  S('gerSession').style.display='block';
+  gerRenderQuestion();
+}
+
+function gerRenderQuestion(){
+  if(gerIdx>=gerPool.length){gerShowEnd();return;}
+  const q=gerPool[gerIdx];
+  S('gerProgress').textContent=`第 ${gerIdx+1} / ${gerPool.length} 題`;
+  S('gerProgressBar').style.width=(((gerIdx+1)/gerPool.length)*100)+'%';
+  S('gerTopic').textContent=q.topic;
+  S('gerStem').innerHTML=q.stem.replace("___","<span style='display:inline-block;min-width:60px;border-bottom:2px solid #B4B2A9;text-align:center;color:#888780'>&nbsp;&nbsp;&nbsp;&nbsp;</span>");
+  S('gerFeedback').style.display='none';
+  S('gerExplain').style.display='none';
+  S('gerNextBtn').style.display='none';
+  const grid=S('gerOpts');grid.innerHTML='';
+  q.opts.forEach((o,i)=>{
+    const b=document.createElement('button');
+    b.style.cssText='width:100%;padding:11px 14px;margin-bottom:8px;background:#fff;border:2px solid #E0DDD6;border-radius:12px;font-size:14px;text-align:left;cursor:pointer;transition:all 0.15s';
+    b.textContent=o;
+    b.onclick=()=>gerCheckAnswer(b,i,q);
+    grid.appendChild(b);
+  });
+}
+
+function gerCheckAnswer(btn, chosen, q){
+  if(gerAutoTimer){clearTimeout(gerAutoTimer);gerAutoTimer=null;}
+  document.querySelectorAll('#gerOpts button').forEach(b=>b.onclick=null);
+  const ok=chosen===q.ans;
+  if(ok){
+    gerScore++;
+    playSound('correct');
+    btn.style.background='#C6EFCE'; btn.style.borderColor='#4CAF50';
+  } else {
+    playSound('wrong');
+    btn.style.background='#FFC7CE'; btn.style.borderColor='#E53935';
+    document.querySelectorAll('#gerOpts button').forEach((b,i)=>{
+      if(i===q.ans){b.style.background='#C6EFCE';b.style.borderColor='#4CAF50';}
+    });
+    // 記錄到 gramErrors
+    if(!stats.gramErrors)stats.gramErrors={};
+    stats.gramErrors[q.topic]=(stats.gramErrors[q.topic]||0)+1;
+  }
+  stats.tG++; stats.tG_today=(stats.tG_today||0)+1;
+  if(ok){stats.cG++;stats.cG_today=(stats.cG_today||0)+1;}
+  saveData(); renderStats();
+  const fb=S('gerFeedback');
+  fb.textContent=ok?'✓ 答對了！':'✗ 答錯了，正確答案是：'+q.opts[q.ans];
+  fb.style.cssText='display:block;padding:10px 14px;border-radius:10px;font-size:14px;font-weight:600;margin-bottom:8px;background:'+(ok?'#C6EFCE':'#FFC7CE')+';color:'+(ok?'#27500A':'#A32D2D');
+  S('gerExplain').style.display='block';
+  S('gerExplain').textContent='📝 '+q.explain;
+  S('gerNextBtn').style.display='block';
+  if(ok){
+    gerAutoTimer=setTimeout(()=>{gerAutoTimer=null;gerNext();},1000);
+  }
+}
+
+function gerNext(){
+  if(gerAutoTimer){clearTimeout(gerAutoTimer);gerAutoTimer=null;}
+  gerIdx++;
+  gerRenderQuestion();
+}
+
+function gerShowEnd(){
+  const pct=gerPool.length?Math.round(gerScore/gerPool.length*100):0;
+  S('gerSession').style.display='none';
+  S('gerRoundEnd').style.display='block';
+  S('gerEndScore').textContent=`${gerScore} / ${gerPool.length}`;
+  S('gerEndPct').textContent=pct+'%';
+  const msg=pct===100?'🎉 全部答對！文法高手！':pct>=80?'👍 非常好！繼續保持！':pct>=60?'😊 不錯喔！繼續加油！':pct>=40?'🙂 有進步空間，繼續努力！':'💪 別灰心，多練習就會進步！';
+  S('gerEndMsg').textContent=msg;
+  if(pct===100){
+    startConfetti(S('gramErrorReviewOverlay'));
+  }
 }
 
 // ═══════════════════════════════════════
@@ -5522,14 +5678,14 @@ function openWrongReview(){
       wrongs.slice(0,20).forEach(entry=>{
         const row=document.createElement('div');
         row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid #E8E6E0;font-size:13px';
-        const delBtn=entry.hasCorrect?`<button onclick="dismissWrongWord('${entry.w}')" style="flex-shrink:0;font-size:11px;padding:1px 7px;background:#EAF3DE;color:#27500A;border:1px solid #639922;border-radius:5px;cursor:pointer">✓ 刪除</button>`:'';
+        const delBtn=`<button onclick="dismissWrongWord('${entry.w}')" style="flex-shrink:0;font-size:11px;padding:1px 7px;background:#EAF3DE;color:#27500A;border:1px solid #639922;border-radius:5px;cursor:pointer">✓ 刪除</button>`;
         row.innerHTML=`<span style="font-weight:600;color:#2C2C2A;flex:1">${entry.w}</span><span style="color:#888780;margin-right:4px">${entry.zh}</span>${delBtn}`;
         wrList.appendChild(row);
       });
     }
   }
-  // 垂直置中（用 flex 替代 block）
-  wrModal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
+  // 顯示 overlay（垂直捲動，內容置中）
+  wrModal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;overflow-y:auto;padding:20px';
   document.body.style.overflow='hidden';
 }
 
