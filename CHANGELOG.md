@@ -2,6 +2,56 @@
 
 ---
 
+## v13 (2026-04-18)
+
+### 新增：PWA (Progressive Web App)
+- `manifest.json`：名稱、圖示 (192/512/maskable)、主題色、standalone 模式、快捷入口
+- `sw.js` service worker：
+  - App Shell 預先快取（HTML/CSS/JS/圖示）→ 支援離線開啟
+  - Supabase 網域一律走網路（認證、session、同步不快取）
+  - stale-while-revalidate 策略 → 背景自動更新
+  - 版本控制 + 新版本提示 toast
+- 支援「安裝到主畫面」(Android/Chrome/Edge) 與 iOS 的「加入主畫面」
+
+### 新增：手機介面全面優化
+- **底部導航列**：手機螢幕 (<768px) 隱藏頂部 tab，改為底部固定 4 格導航（紀錄/練習/遊戲/單字庫），含 iOS 安全區
+- **大觸控區**：主要按鈕最小 44–46px，符合 Apple HIG
+- **滑動翻卡**：Vocab 練習頁支援左右滑切換單字
+- **全螢幕練習模式**：⛶ 按鈕隱藏所有導航，只剩練習內容
+- **深色模式**：🌙 切換，首次跟隨系統 `prefers-color-scheme`
+- **字體大小切換**：S / M / L 三段，Aa 按鈕循環
+- **單手優化**：右下角 FAB 工具列（全螢幕 / 字體 / 深色 / 安裝）
+- 防 iOS 輸入框自動縮放（字體 ≥17px）、防雙擊縮放、無選取反白
+
+### 新增：踢下線即時化
+- **Supabase Realtime 訂閱**：`vocab_users` UPDATE 事件 → 毫秒級踢下線（原 30 秒輪詢仍保留為備援）
+- **visibilitychange**：從背景切回前景時立刻驗證 session
+- **pagehide / beforeunload**：離開前強制 flush `_dbSaveNow` → 防資料丟失
+- **伺服器端強化** (新 `supabase_v13_upgrade.sql`)：
+  - `save_progress` / `get_progress` 新增選填 `p_token` 參數
+  - client 每次儲存帶上 session_token，token 不符 → 拒絕寫入 (`session_expired`)
+  - 防「殭屍分頁」被踢後仍偷偷寫入髒資料
+
+### 修正：被踢後重複觸發
+- `_checkSession` 偵測到踢出後，立刻 `_stopSessionChecker()` 並設 `__kicked` 旗標
+- 避免同時多個 async 呼叫重複彈窗、重複清狀態
+
+### 網路狀態
+- 頂部紅色條：偵測到離線自動顯示 `⚠ 目前無網路連線，資料同步暫停`
+- 一回到線上自動觸發 `_dbSaveNow` + `_checkSession`
+
+### 新增檔案
+- `manifest.json` / `sw.js` / `pwa-extras.js`
+- `icon-192.png` / `icon-512.png` / `icon-maskable.png`
+- `supabase_v13_upgrade.sql`（選擇性升級 SQL）
+
+### 需要執行
+1. 部署時把新檔案一起上傳（含 icon 與 sw.js）
+2. 於 Supabase SQL Editor 執行 `supabase_v13_upgrade.sql`（升級 RPC + 啟用 Realtime publication）
+3. 部署路徑需支援 HTTPS（PWA 必要條件）— GitHub Pages 已符合
+
+---
+
 ## v12 (2026-04-16)
 
 ### 修正：登入 session 衝突偵測

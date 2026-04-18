@@ -1,0 +1,51 @@
+{
+  "name": "英文單字練習 Pro",
+  "short_name": "英文單字",
+  "description": "國中生專屬英文單字練習 — 1857 個單字、CEFR 分級、跨裝置同步",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F4F0",
+  "theme_color": "#534AB7",
+  "lang": "zh-TW",
+  "dir": "ltr",
+  "categories": ["education", "books"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "開始練習",
+      "short_name": "練習",
+      "description": "直接進入單字練習",
+      "url": "./index.html?tab=practice",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "遊戲",
+      "short_name": "遊戲",
+      "description": "進入遊戲選單",
+      "url": "./index.html?tab=game",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
+}

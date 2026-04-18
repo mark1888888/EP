@@ -3164,7 +3164,10 @@ async function _checkSession(){
     const result=await resp.json();
     // 若後端回傳 false，代表 token 已被其他裝置覆蓋
     if(result===false||(Array.isArray(result)&&result[0]===false)){
-      // 先儲存再登出
+      // 先儲存再登出（v13：防重複執行）
+      if(window.__kicked) return;
+      window.__kicked = true;
+      _stopSessionChecker();
       await _dbSaveNow();
       currentUser='';currentUserDisplay='';currentUserId='';currentUserHash='';currentUserGrade='';currentSessionToken='';
       if(_dbSaveTimer)clearTimeout(_dbSaveTimer);
@@ -3172,6 +3175,8 @@ async function _checkSession(){
       S("lu").value="";S("lp").value="";
       switchLoginTab('login');
       _showKickedOutModal();
+      // 重設旗標，讓下次登入可以被再次踢
+      setTimeout(function(){ window.__kicked = false; }, 1500);
     }
   }catch(e){
     console.warn('_checkSession error:',e);
@@ -3192,7 +3197,7 @@ async function syncFromDB(){
         'apikey': SUPABASE_ANON_KEY,
         'Authorization':'Bearer '+SUPABASE_ANON_KEY
       },
-      body: JSON.stringify({p_username:currentUser, p_hash:currentUserHash})
+      body: JSON.stringify({p_username:currentUser, p_hash:currentUserHash, p_token:currentSessionToken||null})
     });
     if(!resp.ok) return;
     const rows = await resp.json();
@@ -3236,7 +3241,7 @@ async function syncFromDB(){
 async function _dbSaveNow(){
   if(!currentUser || !currentUserHash) return;
   try{
-    await fetch(SUPABASE_URL+'/rest/v1/rpc/save_progress',{
+    const resp = await fetch(SUPABASE_URL+'/rest/v1/rpc/save_progress',{
       method:'POST',
       headers:{
         'Content-Type':'application/json',
@@ -3249,9 +3254,19 @@ async function _dbSaveNow(){
         p_my_words:   myWords,
         p_stats:      stats,
         p_today_seen: todaySeenWords,
-        p_daily_logs: dailyLogs
+        p_daily_logs: dailyLogs,
+        p_token:      currentSessionToken || null   // v13: 伺服器端驗證 token
       })
     });
+    // v13: 若伺服器回報 session 已過期，立刻觸發 kick 流程
+    if(resp && resp.ok){
+      try{
+        const body = await resp.clone().text();
+        if(body && body.indexOf('session_expired') >= 0){
+          if(typeof _checkSession === 'function') _checkSession();
+        }
+      }catch(_){}
+    }
   }catch(e){
     console.warn('_dbSaveNow error:',e);
   }
